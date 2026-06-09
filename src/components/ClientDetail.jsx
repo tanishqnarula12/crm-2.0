@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ChevronLeft, Download, Plus, Target, Trash2, Pencil, FileText, RefreshCw, CheckCircle2, Save, TrendingUp, IndianRupee 
 } from 'lucide-react';
@@ -6,17 +6,64 @@ import {
   Avatar, Card, btnPrimary, btnSecondary, btnGhost, inputCls 
 } from './UI';
 import { 
-  calcGoal, fmtINR, fmtFull, fmtSip, goalIcon, achievementColor, generateAssumptionsText, refreshAssumptionsText, monthLabel 
+  calcGoal, fmtINR, fmtFull, fmtSip, goalIcon, goalEmoji, achievementColor, generateAssumptionsText, refreshAssumptionsText, monthLabel 
 } from '../utils/calc';
 import { exportClientPdf } from '../utils/pdf';
 
+// Theme mapper for different categories of wealth goals (Minimal & Premium edition)
+const getGoalTheme = (name) => {
+  const n = name.toLowerCase();
+  if (n.includes('freedom') || n.includes('wealth') || n.includes('creation') || n.includes('saving') || n.includes('fund')) {
+    return {
+      cardBg: 'bg-indigo-50/60 dark:bg-indigo-950/30',
+      border: 'border-indigo-200/60 dark:border-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700',
+      primaryText: 'text-indigo-950 dark:text-indigo-200',
+      titleHover: 'group-hover:text-indigo-700 dark:group-hover:text-indigo-300'
+    };
+  }
+  if (n.includes('education') || n.includes('kids') || n.includes('marriage') || n.includes('gift') || n.includes('wedding')) {
+    return {
+      cardBg: 'bg-emerald-50/60 dark:bg-emerald-950/30',
+      border: 'border-emerald-200/60 dark:border-emerald-900/30 hover:border-emerald-300 dark:hover:border-emerald-700',
+      primaryText: 'text-emerald-950 dark:text-emerald-200',
+      titleHover: 'group-hover:text-emerald-700 dark:group-hover:text-emerald-300'
+    };
+  }
+  if (n.includes('home') || n.includes('car') || n.includes('dream') || n.includes('house') || n.includes('vacation') || n.includes('plane') || n.includes('travel')) {
+    return {
+      cardBg: 'bg-amber-50/60 dark:bg-amber-950/30',
+      border: 'border-amber-200/60 dark:border-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700',
+      primaryText: 'text-amber-950 dark:text-amber-200',
+      titleHover: 'group-hover:text-amber-700 dark:group-hover:text-amber-300'
+    };
+  }
+  if (n.includes('emergency') || n.includes('shield') || n.includes('crisis') || n.includes('medical') || n.includes('health')) {
+    return {
+      cardBg: 'bg-rose-50/60 dark:bg-rose-950/30',
+      border: 'border-rose-200/60 dark:border-rose-900/30 hover:border-rose-300 dark:hover:border-rose-700',
+      primaryText: 'text-rose-950 dark:text-rose-200',
+      titleHover: 'group-hover:text-rose-700 dark:group-hover:text-rose-300'
+    };
+  }
+  // Default
+  return {
+    cardBg: 'bg-slate-50/60 dark:bg-slate-900/50',
+    border: 'border-slate-200/60 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700',
+    primaryText: 'text-slate-900 dark:text-white',
+    titleHover: 'group-hover:text-blue-600 dark:group-hover:text-blue-400'
+  };
+};
+
 export default function ClientDetail({ client, totals, onBack, onAddGoal, onSelectGoal, onDeleteGoal, onSaveAssumptions, onEditClient }) {
+  const containerRef = useRef(null);
   const [exporting, setExporting] = useState(false);
+  const [includeProjection, setIncludeProjection] = useState(true);
+
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
-      await exportClientPdf(client);
+      await exportClientPdf(containerRef.current, client, includeProjection);
     } catch (err) {
       alert('Could not generate PDF: ' + err.message);
     } finally {
@@ -25,108 +72,140 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
   };
 
   return (
-    <div>
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-900 mb-5 transition-colors group">
-        <ChevronLeft size={16} className="transition-transform group-hover:translate-x-[-2px]" /> Back to clients
+    <div ref={containerRef} className="space-y-6 animate-fade-in">
+      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group cursor-pointer">
+        <ChevronLeft size={16} className="transition-transform group-hover:translate-x-[-2px]" /> Back to clients directory
       </button>
 
-      <Card className="p-6 mb-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <Card className="p-6 border border-slate-200/60 dark:border-slate-800/80">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Avatar name={client.name} size="lg" />
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">{client.name}</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                <span className="font-mono tracking-wide bg-slate-100 px-2 py-0.5 rounded text-xs">{client.pan}</span>
-                <span className="mx-2 text-slate-300">·</span>
-                {client.age} years old
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{client.name}</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 font-medium flex items-center gap-2">
+                <span className="font-mono tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-lg text-xs border border-slate-200/40 dark:border-slate-700/40">{client.pan}</span>
+                <span className="text-slate-300 dark:text-slate-700">•</span>
+                <span>{client.age || '—'} years old</span>
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button onClick={onEditClient} className={btnSecondary + ' flex-1 sm:flex-none'}>
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <button onClick={onEditClient} className={btnSecondary + ' flex-1 md:flex-none'}>
               <Pencil size={14} /> Edit Details
             </button>
-            <button onClick={handleExport} disabled={exporting} className={btnSecondary + ' flex-1 sm:flex-none disabled:opacity-60 disabled:cursor-wait'}>
+            <button onClick={handleExport} disabled={exporting} className={btnSecondary + ' flex-1 md:flex-none disabled:opacity-60 disabled:cursor-wait'}>
               <Download size={14} className={exporting ? 'animate-bounce' : ''} /> {exporting ? 'Generating…' : 'Export PDF'}
             </button>
-            <button onClick={onAddGoal} className={btnPrimary + ' flex-1 sm:flex-none'}>
+            <button
+              onClick={() => setIncludeProjection(v => !v)}
+              title="Toggle Year-by-year projection tables in exported PDF"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors flex-1 md:flex-none cursor-pointer ${
+                includeProjection
+                  ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/40'
+                  : 'bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <TrendingUp size={12} /> {includeProjection ? 'Projections: On' : 'Projections: Off'}
+            </button>
+            <button onClick={onAddGoal} className={btnPrimary + ' flex-1 md:flex-none'}>
               <Plus size={14} /> Add goal
             </button>
           </div>
         </div>
 
         {client.goals && client.goals.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-100">
-            <SummaryTile label="Total SIP needed" value={fmtSip(totals.totalSip) + '/mo'} icon={TrendingUp} accent="blue" />
-            <SummaryTile label="Additional SIP needed" value={fmtSip(totals.totalAdditional) + '/mo'} icon={Plus} accent="indigo" />
-            <SummaryTile label="Lump-sum needed today" value={fmtFull(totals.totalLump)} icon={IndianRupee} accent="emerald" />
+          <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 space-y-6 animate-fade-in">
+            {/* SIP Summary Section */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest pl-2.5 border-l-2 border-blue-500 dark:border-blue-400 leading-none">SIP</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <SummaryTile label="Current SIP Allocation" value={fmtSip(totals.totalCurrentSip) + '/mo'} icon={TrendingUp} accent="blue" />
+                <SummaryTile label="Additional SIP Required" value={fmtSip(totals.totalAdditional) + '/mo'} icon={Plus} accent="indigo" />
+                <SummaryTile label="Total Monthly SIP Needed" value={fmtSip(totals.totalSip) + '/mo'} icon={CheckCircle2} accent="emerald" />
+              </div>
+            </div>
+
+            {/* Lump-sum Summary Section */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest pl-2.5 border-l-2 border-emerald-500 dark:border-emerald-400 leading-none">Lump-sum</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <SummaryTile label="Lump-sum Equivalent Today" value={fmtFull(totals.totalLump)} icon={IndianRupee} accent="emerald" />
+              </div>
+            </div>
           </div>
         )}
       </Card>
 
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-bold text-slate-800">Goals ({client.goals ? client.goals.length : 0})</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Goals Summary ({client.goals ? client.goals.length : 0})</h3>
       </div>
 
       {!client.goals || client.goals.length === 0 ? (
-        <Card className="p-12 text-center border-dashed border-2 border-slate-200">
-          <Target className="mx-auto text-slate-300 mb-4" size={36} />
-          <p className="text-sm text-slate-500 mb-4">No goals defined yet for this client</p>
+        <Card className="p-12 text-center border-dashed border-2 border-slate-200 dark:border-slate-800">
+          <Target className="mx-auto text-slate-400 dark:text-slate-600 mb-4" size={36} />
+          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-4">No goals configured yet for this client portfolio</p>
           <button onClick={onAddGoal} className={btnSecondary}>
             <Plus size={14} /> Create the first goal
           </button>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {client.goals.map(g => {
             const c = calcGoal(g);
-            const Icon = goalIcon(g.name);
+            const theme = getGoalTheme(g.name);
             return (
-              <Card key={g.id} className="p-5 hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group" >
-                <div onClick={() => onSelectGoal(g.id)}>
-                  <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-sky-50 ring-1 ring-blue-100 flex items-center justify-center text-blue-700 shrink-0">
-                        <Icon size={18} />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-slate-900 truncate">{g.name}</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          Target {monthLabel(g.targetMonth || 1, g.targetYear)}
-                          {c.years > 0 && ` · ${c.years >= 1 ? `${c.years.toFixed(1)} yrs` : `${c.months} mo`}`}
-                        </p>
-                      </div>
+              <div 
+                key={g.id} 
+                onClick={() => onSelectGoal(g.id)}
+                className={`p-6 ${theme.cardBg} rounded-[28px] border ${theme.border} shadow-md shadow-slate-100/80 dark:shadow-none transition-all duration-300 hover:scale-[1.015] hover:-translate-y-1.5 active:scale-[0.99] group cursor-pointer hover:shadow-xl hover:shadow-slate-200/40 dark:hover:shadow-none space-y-4`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-12 h-12 flex items-center justify-center shrink-0 text-3xl select-none">
+                      {goalEmoji(g.name)}
                     </div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onDeleteGoal(g.id); }} 
-                      className="text-slate-300 hover:text-rose-600 p-2 rounded-md hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-
-                  <div className="mb-4">
-                    <div className="flex items-baseline justify-between mb-1.5">
-                      <span className="text-xs text-slate-500 font-semibold">Achievement Progress</span>
-                      <span className="text-xs font-bold text-slate-900 tabular-nums">{c.achievementPct.toFixed(1)}%</span>
-                    </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all duration-500 ${achievementColor(c.achievementPct)}`} style={{ width: `${Math.min(100, c.achievementPct)}%` }} />
+                    <div className="min-w-0">
+                      <h4 className={`font-bold ${theme.primaryText} truncate text-base ${theme.titleHover} transition-colors tracking-tight`}>
+                        {g.name}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-bold uppercase tracking-wider text-[10px]">
+                        Target {monthLabel(g.targetMonth || 1, g.targetYear)}
+                        {c.years > 0 && ` · ${c.years >= 1 ? `${c.years.toFixed(1)} yrs` : `${c.months} mo`}`}
+                      </p>
                     </div>
                   </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onDeleteGoal(g.id); }} 
+                    className="text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 p-2 rounded-xl hover:bg-rose-50/50 dark:hover:bg-rose-950/30 transition-all opacity-0 group-hover:opacity-100 cursor-pointer active:scale-95"
+                    title="Delete goal"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
 
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs border-t border-slate-50 pt-3">
-                    <KV label="Goal (today)" value={fmtINR(g.amount)} />
-                    <KV label="Future value" value={fmtINR(c.futureValue)} />
-                    <KV label="Current investment" value={fmtINR(g.currentInv)} />
-                    <KV label="Current SIP" value={fmtSip(g.currentSip) + '/mo'} />
-                    <KV label="Total SIP needed" value={fmtSip(c.sipRequired) + '/mo'} />
-                    <KV label="Additional SIP" value={c.sipOnTrack ? null : (fmtSip(c.additionalSip) + '/mo')} pill={c.sipOnTrack ? 'On track' : null} />
-                    <KV label="Lump-sum req." value={fmtINR(c.lumpSumRequired)} />
+                <div>
+                  <div className="flex items-baseline justify-between mb-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Achievement Progress</span>
+                    <span className="text-xs font-black text-slate-900 dark:text-white tabular-nums">{c.achievementPct.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-3.5 bg-slate-200/50 dark:bg-slate-950 rounded-full overflow-hidden border border-slate-200/20 dark:border-slate-900 shadow-inner">
+                    <div className={`h-full rounded-full transition-all duration-500 ${achievementColor(c.achievementPct)}`} style={{ width: `${Math.min(100, c.achievementPct)}%` }} />
                   </div>
                 </div>
-              </Card>
+
+                <div className="grid grid-cols-2 gap-2.5 border-t border-slate-200/20 dark:border-slate-800/50 pt-4">
+                  <KV label="Goal cost (today)" value={fmtINR(g.amount)} />
+                  <KV label="Future value" value={fmtINR(c.futureValue)} />
+                  <KV label="Current corpus" value={fmtINR(g.currentInv)} />
+                  <KV label="Current SIP" value={fmtSip(g.currentSip) + '/mo'} />
+                  <KV label="Total SIP needed" value={fmtSip(c.sipRequired) + '/mo'} highlight />
+                  <KV label="Additional SIP" value={c.sipOnTrack ? null : (fmtSip(c.additionalSip) + '/mo')} pill={c.sipOnTrack ? 'On track' : null} highlight={!c.sipOnTrack} />
+                  <div className="col-span-2">
+                    <KV label="Lump-sum equivalent required today" value={fmtINR(c.lumpSumRequired)} isLump />
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -139,126 +218,167 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
   );
 }
 
+const getQualitativeNotes = (text, client) => {
+  if (!text) return '';
+  const fresh = generateAssumptionsText(client);
+  if (text.trim() === fresh.trim()) return '';
+  
+  // Try to remove the fresh block
+  let cleaned = text.replace(fresh, '').trim();
+  
+  // If the fresh block didn't match perfectly, strip lines matching headers or bullets
+  if (cleaned.includes('Inflation rate:') || cleaned.includes('Expected return:') || cleaned.includes('SIP step-up rate:')) {
+    cleaned = cleaned.split('\n')
+      .filter(line => {
+        const l = line.trim();
+        return !l.startsWith('•') && 
+               !l.startsWith('*') && 
+               !l.startsWith('-') && 
+               !l.startsWith('Inflation rate') && 
+               !l.startsWith('Expected return') && 
+               !l.startsWith('SIP step-up rate');
+      })
+      .join('\n')
+      .trim();
+  }
+  return cleaned;
+};
+
 function AssumptionsSection({ client, onSave }) {
   const savedText = client.assumptions;
   const hasSaved = typeof savedText === 'string' && savedText.length > 0;
   const generated = useMemo(() => generateAssumptionsText(client), [client]);
   const displayText = hasSaved ? savedText : generated;
 
+  const notesOnly = useMemo(() => {
+    return getQualitativeNotes(displayText, client);
+  }, [displayText, client]);
+
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(displayText);
-  const [confirmRefresh, setConfirmRefresh] = useState(false);
-  const [justRefreshed, setJustRefreshed] = useState(false);
+  const [draft, setDraft] = useState(notesOnly);
 
   useEffect(() => {
-    if (!editing) setDraft(displayText);
-  }, [displayText, editing]);
+    if (!editing) {
+      setDraft(getQualitativeNotes(displayText, client));
+    }
+  }, [displayText, editing, client]);
 
   const startEdit = () => {
-    setDraft(displayText);
+    setDraft(getQualitativeNotes(displayText, client));
     setEditing(true);
-    setConfirmRefresh(false);
-    setJustRefreshed(false);
   };
   const cancel = () => {
-    setDraft(displayText);
     setEditing(false);
-    setConfirmRefresh(false);
   };
   const save = () => {
-    onSave(draft);
-    setEditing(false);
-    setConfirmRefresh(false);
-  };
-  const doRefresh = () => {
-    const next = refreshAssumptionsText(client, draft || '');
-    setDraft(next);
-    setConfirmRefresh(false);
-    setJustRefreshed(true);
-    setTimeout(() => setJustRefreshed(false), 1800);
-  };
-  const onRefreshClick = () => {
     const fresh = generateAssumptionsText(client);
-    if (!draft.trim() || draft === fresh) {
-      doRefresh();
-      return;
-    }
-    const next = refreshAssumptionsText(client, draft);
-    if (next === draft) {
-      setJustRefreshed(true);
-      setTimeout(() => setJustRefreshed(false), 1800);
-      return;
-    }
-    setConfirmRefresh(true);
+    const combined = draft.trim() ? `${fresh}\n\n${draft.trim()}` : fresh;
+    onSave(combined);
+    setEditing(false);
   };
 
   return (
-    <Card className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-50 to-sky-50 ring-1 ring-blue-100 flex items-center justify-center text-blue-700">
-            <FileText size={16} />
+    <Card className="p-6 border border-slate-200/60 dark:border-slate-800/80">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50/50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-100/40 dark:border-blue-900/30 flex items-center justify-center">
+            <FileText size={18} />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-900">Assumptions</h3>
-            <p className="text-xs text-slate-500">Notes and assumptions used in planning for this client</p>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Planning Assumptions</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium font-sans">Growth and forecasting guidelines used for portfolio projections</p>
           </div>
         </div>
         {!editing && (
           <button onClick={startEdit} className={btnSecondary}>
-            <Pencil size={14} /> Edit
+            <Pencil size={14} /> Edit Notes
           </button>
         )}
       </div>
 
       {!editing ? (
-        <div className="rounded-lg bg-slate-50 ring-1 ring-slate-100 px-4 py-3.5 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed font-sans border border-slate-200/20">
-          {displayText}
-          {!hasSaved && (
-            <p className="mt-3 text-[11px] text-slate-400 italic">
-              Auto-generated from goals. Click Edit to customise and save.
-            </p>
+        <div className="space-y-5">
+          {client.goals && client.goals.length > 0 ? (
+            <div className="space-y-3">
+              <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Quantitative Rates Matrix</h4>
+              <div className="overflow-hidden border border-slate-200/60 dark:border-slate-800/80 rounded-xl bg-white dark:bg-slate-950/50 shadow-sm">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50/70 dark:bg-slate-900/40 text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200/50 dark:border-slate-800/80">
+                    <tr>
+                      <th className="text-left px-5 py-3 font-bold">Goal Category</th>
+                      <th className="text-right px-5 py-3 font-bold">Inflation</th>
+                      <th className="text-right px-5 py-3 font-bold">Exp. Return</th>
+                      <th className="text-right px-5 py-3 font-bold">SIP Step-Up</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200/50 dark:divide-slate-800/50">
+                    {client.goals.map(g => (
+                      <tr key={g.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/20 transition-colors">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-lg select-none">{goalEmoji(g.name)}</span>
+                            <span className="font-bold text-slate-900 dark:text-white">{g.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-right font-mono">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 ring-1 ring-rose-200/40 dark:ring-rose-900/20 text-xs font-bold">
+                            {g.inflation}%
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right font-mono">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-200/40 dark:ring-emerald-900/20 text-xs font-bold">
+                            {g.expectedReturn}%
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right font-mono">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 ring-1 ring-blue-200/40 dark:ring-blue-900/20 text-xs font-bold">
+                            {g.sipIncRate}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-6 text-center text-xs text-slate-450 dark:text-slate-500 font-sans italic">
+              No financial goals configured yet. Projections and rates will display once goals are added.
+            </div>
           )}
+
+          <div className="space-y-2.5">
+            <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Qualitative Planning Notes</h4>
+            {notesOnly ? (
+              <div className="rounded-xl bg-slate-50/50 dark:bg-slate-950/50 border border-slate-200/50 dark:border-slate-800/80 px-5 py-4 text-sm text-slate-700 dark:text-slate-350 whitespace-pre-wrap leading-relaxed font-sans shadow-inner">
+                {notesOnly}
+              </div>
+            ) : (
+              <div className="rounded-xl bg-slate-50/30 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-800 px-5 py-5 text-center text-xs text-slate-400 dark:text-slate-500 font-sans italic">
+                No customized planning notes saved yet. Click "Edit Notes" to add custom commentary, recommendations, or planning disclaimers.
+              </div>
+            )}
+          </div>
         </div>
       ) : (
-        <div>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Edit Planning Notes</h4>
+            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 italic">Quantitative rates are synced automatically</span>
+          </div>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            rows={Math.max(8, Math.min(20, (draft.match(/\n/g) || []).length + 2))}
-            className={inputCls + ' font-sans leading-relaxed resize-y'}
-            placeholder="Write your assumptions and notes for this client…"
+            rows={6}
+            className={inputCls + ' font-sans leading-relaxed resize-y focus:ring-blue-500'}
+            placeholder="Enter advisor notes, disclaimers, or qualitative assumptions here..."
           />
 
-          {confirmRefresh && (
-            <div className="mt-3 flex items-center justify-between gap-3 px-3 py-2.5 bg-amber-50 ring-1 ring-amber-200 rounded-lg">
-              <p className="text-xs text-amber-800">
-                Update the rate list with fresh values from this client's goals? Your notes stay untouched.
-              </p>
-              <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => setConfirmRefresh(false)} className="text-xs font-semibold text-slate-600 hover:text-slate-950 px-2 py-1">Cancel</button>
-                <button onClick={doRefresh} className="text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-md">Yes, update</button>
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between mt-3 gap-2">
-            <div className="flex items-center gap-2">
-              <button onClick={onRefreshClick} className={btnGhost} title="Replace text with a fresh version pulled from this client's goals">
-                <RefreshCw size={14} /> Refresh from goals
-              </button>
-              {justRefreshed && (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200 px-2.5 py-0.5 rounded-full">
-                  <CheckCircle2 size={12} /> Refreshed
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={cancel} className={btnGhost}>Cancel</button>
-              <button onClick={save} className={btnPrimary}>
-                <Save size={14} /> Save
-              </button>
-            </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-850">
+            <button onClick={cancel} className={btnGhost}>Cancel</button>
+            <button onClick={save} className={btnPrimary}>
+              <Save size={14} /> Save notes
+            </button>
           </div>
         </div>
       )}
@@ -268,33 +388,47 @@ function AssumptionsSection({ client, onSave }) {
 
 function SummaryTile({ label, value, icon: Icon, accent }) {
   const accents = {
-    blue: 'from-blue-50 to-blue-100/30 text-blue-700 ring-blue-200/50',
-    indigo: 'from-indigo-50 to-indigo-100/30 text-indigo-700 ring-indigo-200/50',
-    emerald: 'from-emerald-50 to-emerald-100/30 text-emerald-700 ring-emerald-200/50',
+    blue: 'bg-blue-50/60 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/40 shadow-sm',
+    indigo: 'bg-indigo-50/60 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-900/40 shadow-sm',
+    emerald: 'bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40 shadow-sm',
   };
   return (
-    <div className={`rounded-xl bg-gradient-to-br ${accents[accent]} ring-1 p-4 flex items-start justify-between hover:scale-[1.01] transition-transform`}>
+    <div className={`rounded-2xl ${accents[accent]} p-5 flex items-start justify-between border border-transparent transition-all duration-300`}>
       <div className="min-w-0">
-        <p className="text-xs font-semibold opacity-85 mb-1">{label}</p>
-        <p className="text-lg font-bold tabular-nums">{value}</p>
+        <p className="text-[10px] font-bold uppercase tracking-wider opacity-75 mb-2">{label}</p>
+        <p className="text-xl font-bold tracking-tight tabular-nums truncate">{value}</p>
       </div>
-      <div className="w-8 h-8 rounded-lg bg-white/60 flex items-center justify-center shrink-0">
-        <Icon size={15} />
+      <div className="w-10 h-10 rounded-xl bg-white/80 dark:bg-slate-900/60 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/40 dark:border-slate-800/80 shadow-sm text-slate-800 dark:text-white">
+        <Icon size={16} />
       </div>
     </div>
   );
 }
 
-function KV({ label, value, pill }) {
+function KV({ label, value, pill, highlight, isLump }) {
+  let containerCls = 'bg-white dark:bg-slate-950 border-slate-100 dark:border-slate-800 shadow-sm';
+  let labelCls = 'text-slate-400 dark:text-slate-500';
+  let valueCls = 'text-slate-800 dark:text-slate-200';
+
+  if (highlight) {
+    containerCls = 'bg-white dark:bg-slate-950 border-slate-100 dark:border-slate-800 shadow-sm';
+    labelCls = 'text-blue-600 dark:text-blue-400';
+    valueCls = 'text-blue-800 dark:text-blue-300 font-extrabold';
+  } else if (isLump) {
+    containerCls = 'bg-white dark:bg-slate-950 border-slate-100 dark:border-slate-800 shadow-sm';
+    labelCls = 'text-emerald-600 dark:text-emerald-400';
+    valueCls = 'text-emerald-800 dark:text-emerald-300 font-black text-sm';
+  }
+
   return (
-    <div>
-      <p className="text-slate-500 text-[10px] font-semibold mb-0.5 uppercase tracking-wider">{label}</p>
+    <div className={`p-3 rounded-2xl border transition-all duration-250 ${containerCls}`}>
+      <p className={`text-[9px] font-bold mb-1.5 uppercase tracking-wider ${labelCls}`}>{label}</p>
       {pill ? (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/50 rounded-full mt-0.5">
-          <CheckCircle2 size={10} /> {pill}
+        <span className="inline-flex items-center gap-1 px-3 py-1 text-[9px] font-bold bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-450 ring-1 ring-emerald-500/20 rounded-full mt-1.5 animate-fade-in">
+          <CheckCircle2 size={10} className="text-emerald-500" /> {pill}
         </span>
       ) : (
-        <p className="font-bold text-slate-900 tabular-nums">{value}</p>
+        <p className={`font-bold tabular-nums text-xs ${valueCls}`}>{value}</p>
       )}
     </div>
   );

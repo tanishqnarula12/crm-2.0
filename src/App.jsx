@@ -3,7 +3,7 @@ import {
   Users, Target, FileBarChart, Plus, ChevronLeft, Trash2, X, TrendingUp, IndianRupee,
   Calendar, Percent, Search, SlidersHorizontal, Pencil, Info, Shield, Plane, Car,
   Home, Heart, GraduationCap, Gift, Sparkles, Wallet, MoreHorizontal, CheckCircle2,
-  AlertCircle, Download, RefreshCw, Save, FileText
+  AlertCircle, Download, RefreshCw, Save, FileText, Sun, Moon
 } from 'lucide-react';
 
 // DB Service & Calculation Utils
@@ -11,7 +11,7 @@ import {
   getClients, addClient, updateClient, deleteClient, addGoal, updateGoal, deleteGoal 
 } from './services/db';
 import { 
-  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween 
+  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween, fmtSip 
 } from './utils/calc';
 
 // Subcomponents
@@ -21,6 +21,7 @@ import GoalDetail from './components/GoalDetail';
 import { GoalsOverview, GoalGroupDetail } from './components/GoalsOverview';
 import ReportsView from './components/ReportsView';
 import { ClientFormModal, GoalFormModal, ExcelImportModal } from './components/Modals';
+import { StatTile } from './components/UI';
 
 // Assets
 import logoImg from './assets/logo.png';
@@ -45,12 +46,22 @@ export default function App() {
   // Filters & Report view states
   const [reportGoalFilter, setReportGoalFilter] = useState('all');
   const [reportTimeframe, setReportTimeframe] = useState(5);
-  
-  // Force light mode on mount
+
+  // Dynamic light/dark theme preference
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('gms:theme');
+    if (saved) return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+
   useEffect(() => {
-    document.documentElement.classList.remove('dark');
-    localStorage.removeItem('gms:theme');
-  }, []);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('gms:theme', theme);
+  }, [theme]);
 
   // Load clients on startup
   const loadData = async () => {
@@ -86,16 +97,45 @@ export default function App() {
 
   // Calculate totals for active client
   const totals = useMemo(() => {
-    if (!selectedClient || !selectedClient.goals) return { totalSip: 0, totalAdditional: 0, totalLump: 0 };
-    let totalSip = 0, totalAdditional = 0, totalLump = 0;
+    if (!selectedClient || !selectedClient.goals) return { totalSip: 0, totalAdditional: 0, totalLump: 0, totalCurrentSip: 0 };
+    let totalSip = 0, totalAdditional = 0, totalLump = 0, totalCurrentSip = 0;
     selectedClient.goals.forEach(g => {
       const c = calcGoal(g);
       totalSip += c.sipRequired;
       totalAdditional += c.additionalSip;
       totalLump += c.lumpSumRequired;
+      totalCurrentSip += (Number(g.currentSip) || 0);
     });
-    return { totalSip, totalAdditional, totalLump };
+    return { totalSip, totalAdditional, totalLump, totalCurrentSip };
   }, [selectedClient]);
+
+  // Build global statistics
+  const globalStats = useMemo(() => {
+    const totalClients = clients.length;
+    let activeGoals = 0;
+    let totalSipNeeded = 0;
+    let totalAchievementPctSum = 0;
+    let goalsCount = 0;
+
+    clients.forEach(c => {
+      const gc = c.goals ? c.goals.length : 0;
+      activeGoals += gc;
+      (c.goals || []).forEach(g => {
+        const calculated = calcGoal(g);
+        totalSipNeeded += calculated.sipRequired;
+        totalAchievementPctSum += calculated.achievementPct;
+        goalsCount++;
+      });
+    });
+
+    const averageCompletion = goalsCount > 0 ? (totalAchievementPctSum / goalsCount) : 0;
+    return {
+      totalClients,
+      activeGoals,
+      totalSipNeeded,
+      averageCompletion
+    };
+  }, [clients]);
 
   // Build rows for Reports timeline tab
   const reportRows = useMemo(() => {
@@ -193,7 +233,7 @@ export default function App() {
 
   if (!loaded) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-500 gap-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-500 gap-4">
         <div className="w-12 h-12 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
         <span className="font-semibold text-sm animate-pulse">Initializing Financial Workspace...</span>
       </div>
@@ -201,27 +241,44 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50/40 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 antialiased font-sans">
       {/* App Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 transition-colors">
+      <header className="bg-white/80 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-800/80 backdrop-blur-md sticky top-0 z-30 transition-colors">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={logoImg} className="h-9 w-9 object-contain rounded-lg" alt="Team Fintness Logo" />
+            <img src={logoImg} className="h-9 w-9 object-contain rounded-xl" alt="Team Fintness Logo" />
             <div className="leading-tight">
-              <h1 className="text-base font-bold text-slate-900">Team Fintness</h1>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Goal Management System</p>
+              <h1 className="text-base font-bold text-slate-900 dark:text-white">Team Fintness</h1>
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Goal Management System</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="hidden md:inline text-xs font-bold text-slate-500 bg-slate-150 px-3 py-1 rounded-full">FY {CURRENT_YEAR}</span>
+          <div className="flex items-center gap-3">
+            <span className="hidden md:inline text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3.5 py-1.5 rounded-full">FY {CURRENT_YEAR}</span>
+            <button
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Global Summary Statistics Dashboard */}
+        {!selectedClientId && !selectedGoalName && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-fade-in">
+            <StatTile label="Total Clients" value={globalStats.totalClients} icon={Users} accent="blue" />
+            <StatTile label="Active Goals" value={globalStats.activeGoals} icon={Target} accent="indigo" />
+            <StatTile label="Total SIP Needed" value={fmtSip(globalStats.totalSipNeeded) + '/mo'} icon={TrendingUp} accent="emerald" />
+            <StatTile label="Avg. Goal Progress" value={`${globalStats.averageCompletion.toFixed(1)}%`} icon={Sparkles} accent="amber" />
+          </div>
+        )}
+
         {/* Navigation Tabs */}
-        <div className="inline-flex items-center gap-1 p-1 bg-white rounded-xl border border-slate-200 shadow-sm mb-6 transition-colors">
+        <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm mb-6 transition-colors">
           {[
             { id: 'clients', label: 'Clients', icon: Users },
             { id: 'goals', label: 'Goals Summary', icon: Target },
@@ -238,10 +295,10 @@ export default function App() {
                   setSelectedGoalId(null);
                   setSelectedGoalName(null);
                 }}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+                className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${
                   active
-                    ? 'bg-gradient-to-br from-blue-700 to-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-50'
+                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Icon size={14} />
@@ -253,65 +310,77 @@ export default function App() {
 
         {/* Tab Routing */}
         {tab === 'clients' && !selectedClientId && (
-          <ClientList
-            clients={clients}
-            onSelect={setSelectedClientId}
-            onAdd={() => setShowAddClient(true)}
-            onDelete={handleDeleteClient}
-            onImport={() => setShowImportExcel(true)}
-          />
+          <div className="animate-scale-up">
+            <ClientList
+              clients={clients}
+              onSelect={setSelectedClientId}
+              onAdd={() => setShowAddClient(true)}
+              onDelete={handleDeleteClient}
+              onImport={() => setShowImportExcel(true)}
+            />
+          </div>
         )}
         
         {tab === 'clients' && selectedClientId && !selectedGoalId && (
-          <ClientDetail
-            client={selectedClient}
-            totals={totals}
-            onBack={() => setSelectedClientId(null)}
-            onAddGoal={() => { setEditingGoalId(null); setShowGoalForm(true); }}
-            onSelectGoal={setSelectedGoalId}
-            onDeleteGoal={(gid) => handleDeleteGoal(selectedClientId, gid)}
-            onSaveAssumptions={(text) => handleSaveAssumptions(selectedClientId, text)}
-            onEditClient={() => { setEditingClientId(selectedClientId); setShowAddClient(true); }}
-          />
+          <div className="animate-scale-up">
+            <ClientDetail
+              client={selectedClient}
+              totals={totals}
+              onBack={() => setSelectedClientId(null)}
+              onAddGoal={() => { setEditingGoalId(null); setShowGoalForm(true); }}
+              onSelectGoal={setSelectedGoalId}
+              onDeleteGoal={(gid) => handleDeleteGoal(selectedClientId, gid)}
+              onSaveAssumptions={(text) => handleSaveAssumptions(selectedClientId, text)}
+              onEditClient={() => { setEditingClientId(selectedClientId); setShowAddClient(true); }}
+            />
+          </div>
         )}
 
         {tab === 'clients' && selectedGoalId && (
-          <GoalDetail
-            goal={selectedGoal}
-            clientName={selectedClient.name}
-            onBack={() => setSelectedGoalId(null)}
-            onEdit={() => { setEditingGoalId(selectedGoalId); setShowGoalForm(true); }}
-          />
+          <div className="animate-scale-up">
+            <GoalDetail
+              goal={selectedGoal}
+              clientName={selectedClient.name}
+              onBack={() => setSelectedGoalId(null)}
+              onEdit={() => { setEditingGoalId(selectedGoalId); setShowGoalForm(true); }}
+            />
+          </div>
         )}
 
         {tab === 'goals' && !selectedGoalName && (
-          <GoalsOverview goalGroups={allGoalNames} onSelect={setSelectedGoalName} />
+          <div className="animate-scale-up">
+            <GoalsOverview goalGroups={allGoalNames} onSelect={setSelectedGoalName} />
+          </div>
         )}
 
         {tab === 'goals' && selectedGoalName && (
-          <GoalGroupDetail
-            groupName={selectedGoalName}
-            entries={allGoalNames.find(g => g.name === selectedGoalName)?.clients || []}
-            onBack={() => setSelectedGoalName(null)}
-            onSelectClient={(cid) => { setTab('clients'); setSelectedClientId(cid); setSelectedGoalName(null); }}
-          />
+          <div className="animate-scale-up">
+            <GoalGroupDetail
+              groupName={selectedGoalName}
+              entries={allGoalNames.find(g => g.name === selectedGoalName)?.clients || []}
+              onBack={() => setSelectedGoalName(null)}
+              onSelectClient={(cid) => { setTab('clients'); setSelectedClientId(cid); setSelectedGoalName(null); }}
+            />
+          </div>
         )}
 
         {tab === 'reports' && (
-          <ReportsView
-            goalNames={allGoalNames.map(g => g.name)}
-            goalFilter={reportGoalFilter}
-            setGoalFilter={setReportGoalFilter}
-            timeframe={reportTimeframe}
-            setTimeframe={setReportTimeframe}
-            rows={reportRows}
-            onOpenClient={(cid) => { setTab('clients'); setSelectedClientId(cid); }}
-          />
+          <div className="animate-scale-up">
+            <ReportsView
+              goalNames={allGoalNames.map(g => g.name)}
+              goalFilter={reportGoalFilter}
+              setGoalFilter={setReportGoalFilter}
+              timeframe={reportTimeframe}
+              setTimeframe={setReportTimeframe}
+              rows={reportRows}
+              onOpenClient={(cid) => { setTab('clients'); setSelectedClientId(cid); }}
+            />
+          </div>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-6 py-8 text-xs text-slate-400 text-center border-t border-slate-200/40 mt-10">
+      <footer className="max-w-7xl mx-auto px-6 py-10 text-xs text-slate-400 dark:text-slate-500 text-center border-t border-slate-200/40 dark:border-slate-800/40 mt-12">
         © {CURRENT_YEAR} Team Fintness · Building fitter financial futures
       </footer>
 

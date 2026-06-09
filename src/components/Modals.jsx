@@ -8,16 +8,16 @@ import {
 
 function Modal({ title, onClose, children, footer, maxWidth = 'max-w-md' }) {
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in" onClick={onClose}>
-      <div className={`bg-white rounded-2xl w-full ${maxWidth} shadow-2xl my-8 border border-slate-200/50 animate-scale-up`} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 rounded-md hover:bg-slate-100 transition-colors">
+    <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in" onClick={onClose}>
+      <div className={`bg-white dark:bg-slate-900 rounded-2xl w-full ${maxWidth} shadow-2xl my-8 border border-slate-200/50 dark:border-slate-800/80 animate-scale-up`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">{title}</h3>
+          <button onClick={onClose} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
             <X size={18} />
           </button>
         </div>
         <div className="p-5">{children}</div>
-        {footer && <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">{footer}</div>}
+        {footer && <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 rounded-b-2xl">{footer}</div>}
       </div>
     </div>
   );
@@ -32,7 +32,7 @@ export function ClientFormModal({ initial, onClose, onSave }) {
 
   return (
     <Modal
-      title={isEdit ? "Edit Client Details" : "Add New Client"}
+      title={isEdit ? "Edit Client Profile" : "Create Client Profile"}
       onClose={onClose}
       footer={
         <div className="flex justify-end gap-2">
@@ -42,20 +42,20 @@ export function ClientFormModal({ initial, onClose, onSave }) {
             disabled={!name.trim() || !panValid} 
             className={btnPrimary}
           >
-            {isEdit ? "Save Changes" : "Save Client"}
+            {isEdit ? "Save Changes" : "Create Client"}
           </button>
         </div>
       }
     >
       <div className="space-y-4">
-        <Field label="Name">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Full name" />
+        <Field label="Full Name">
+          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Aarav Sharma" />
         </Field>
-        <Field label="PAN no." hint={pan && !panValid ? 'Format: 5 letters, 4 digits, 1 letter' : null}>
+        <Field label="PAN Card Number" hint={pan && !panValid ? 'Format must be: 5 letters, 4 digits, 1 letter' : null}>
           <input
             value={pan}
             onChange={(e) => setPan(e.target.value.toUpperCase().slice(0, 10))}
-            placeholder="ABCDE1234F"
+            placeholder="e.g. ABCDE1234F"
             maxLength={10}
             className={inputCls + ' font-mono tracking-widest uppercase'}
           />
@@ -124,86 +124,90 @@ export function GoalFormModal({ initial, onClose, onSave }) {
 
   return (
     <Modal
-      title={isEdit ? 'Edit Goal' : 'Add Goal'}
+      title={isEdit ? 'Modify Goal parameters' : 'Configure New Goal'}
       onClose={onClose}
       maxWidth="max-w-3xl"
       footer={
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
           {isEdit && (
-            <p className="text-xs text-slate-400">
-              Started in {monthLabel(initial.createdMonth || CURRENT_MONTH, initial.createdYear || CURRENT_YEAR)} — projections remain anchored
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              Goal Anchor Date: {monthLabel(initial.createdMonth || CURRENT_MONTH, initial.createdYear || CURRENT_YEAR)}
             </p>
           )}
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={onClose} className={btnGhost}>Cancel</button>
             <button onClick={handleSave} disabled={!effectiveName || targetBeforeStart || !form.amount} className={btnPrimary}>
-              {isEdit ? 'Save Changes' : 'Save Goal'}
+              {isEdit ? 'Save Changes' : 'Configure Goal'}
             </button>
           </div>
         </div>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Field label="Goal name">
-          <select value={nameChoice} onChange={(e) => setNameChoice(e.target.value)} className={selectCls}>
-            <option value="" disabled>Select a goal preset…</option>
-            {GOAL_PRESETS.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
+        <Field label="Goal Category Preset">
+          <div className="relative">
+            <select value={nameChoice} onChange={(e) => setNameChoice(e.target.value)} className={selectCls}>
+              <option value="" disabled>Select target goal preset…</option>
+              {GOAL_PRESETS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
           {nameChoice === 'Others' && (
             <input
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
-              placeholder="Enter custom goal name"
-              className={inputCls + ' mt-2'}
+              placeholder="Enter custom goal description"
+              className={inputCls + ' mt-2 animate-fade-in'}
             />
           )}
         </Field>
-        <Field label="Goal amount (in today's values)">
-          <input type="number" value={nv(form.amount)} onChange={(e) => upd('amount', parseNum(e, 0))} className={inputCls} placeholder="₹" />
+        <Field label="Target cost today (₹)">
+          <input type="number" value={nv(form.amount)} onChange={(e) => upd('amount', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 50,00,000" />
         </Field>
 
-        <Field label="Target month">
-          <select value={form.targetMonth} onChange={(e) => upd('targetMonth', Number(e.target.value))} className={selectCls}>
-            {MONTH_NAMES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-          </select>
+        <Field label="Target Month">
+          <div className="relative">
+            <select value={form.targetMonth} onChange={(e) => upd('targetMonth', Number(e.target.value))} className={selectCls}>
+              {MONTH_NAMES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
         </Field>
-        <Field label="Target year">
+        <Field label="Target Year">
           <input type="number" value={nv(form.targetYear)} onChange={(e) => upd('targetYear', parseNum(e, 0))} className={inputCls} />
         </Field>
 
-        <Field label="Future goal value (inflation-adjusted)">
-          <div className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-bold tabular-nums">{fmtFull(previewCalc.futureValue)}</div>
+        <Field label="Future cost (inflation-adjusted)">
+          <div className="w-full px-3.5 py-2.5 text-sm border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-bold tabular-nums shadow-sm">{fmtFull(previewCalc.futureValue)}</div>
         </Field>
-        <Field label="Time to goal">
-          <div className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-700">
-            {targetBeforeStart ? <span className="text-rose-600 font-bold">Target must be in future</span> : <span className="tabular-nums font-semibold">{previewCalc.months} months ({previewCalc.years.toFixed(2)} yrs)</span>}
+        <Field label="Planning Horizon">
+          <div className="w-full px-3.5 py-2.5 text-sm border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-300 shadow-sm">
+            {targetBeforeStart ? <span className="text-rose-600 dark:text-rose-400 font-bold">Target date must be in future</span> : <span className="tabular-nums font-semibold">{previewCalc.months} months ({previewCalc.years.toFixed(2)} yrs)</span>}
           </div>
         </Field>
 
-        <Field label="Inflation rate (%)">
+        <Field label="Assumed Inflation Rate (%)">
           <input type="number" step="0.1" value={nv(form.inflation)} onChange={(e) => upd('inflation', parseNum(e))} className={inputCls} />
         </Field>
-        <Field label="Expected return (%)">
+        <Field label="Expected Portfolio Return (%)">
           <input type="number" step="0.1" value={nv(form.expectedReturn)} onChange={(e) => upd('expectedReturn', parseNum(e))} className={inputCls} />
         </Field>
-        <Field label="SIP step-up rate (annual % increase)">
+        <Field label="SIP Annual Step-Up (%)">
           <input type="number" step="0.1" value={nv(form.sipIncRate)} onChange={(e) => upd('sipIncRate', parseNum(e))} className={inputCls} />
         </Field>
-        <Field label="Current accumulated corpus (if any)">
-          <input type="number" value={nv(form.currentInv)} onChange={(e) => upd('currentInv', parseNum(e, 0))} className={inputCls} placeholder="₹" />
+        <Field label="Existing Accumulated Corpus (₹)">
+          <input type="number" value={nv(form.currentInv)} onChange={(e) => upd('currentInv', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 5,00,000" />
         </Field>
         <div className="md:col-span-2">
-          <Field label="Current monthly SIP (if any)">
-            <input type="number" value={nv(form.currentSip)} onChange={(e) => upd('currentSip', parseNum(e, 0))} className={inputCls} placeholder="₹" />
+          <Field label="Current Monthly SIP Allocation (₹)">
+            <input type="number" value={nv(form.currentSip)} onChange={(e) => upd('currentSip', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 25,000" />
           </Field>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 p-4 bg-gradient-to-br from-blue-50/50 to-sky-50/50 ring-1 ring-blue-100 rounded-xl">
-        <PreviewTile label="Total SIP needed" value={fmtSip(previewCalc.sipRequired) + '/mo'} />
-        <PreviewTile label="Additional SIP" value={previewCalc.sipOnTrack ? null : (fmtSip(previewCalc.additionalSip) + '/mo')} pill={previewCalc.sipOnTrack ? 'On track' : null} />
-        <PreviewTile label="Lump-sum required" value={fmtINR(previewCalc.lumpSumRequired)} />
-        <PreviewTile label="Achievement" value={previewCalc.achievementPct.toFixed(1) + '%'} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mt-6 p-5 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-slate-950 dark:to-slate-900 border border-blue-100 dark:border-slate-800 rounded-xl shadow-sm">
+        <PreviewTile label="Required Monthly SIP" value={fmtSip(previewCalc.sipRequired) + '/mo'} />
+        <PreviewTile label="Additional SIP Needed" value={previewCalc.sipOnTrack ? null : (fmtSip(previewCalc.additionalSip) + '/mo')} pill={previewCalc.sipOnTrack ? 'On track' : null} />
+        <PreviewTile label="Lump-sum Equivalent" value={fmtINR(previewCalc.lumpSumRequired)} />
+        <PreviewTile label="Projected Progress" value={previewCalc.achievementPct.toFixed(1) + '%'} />
       </div>
     </Modal>
   );
@@ -276,12 +280,12 @@ export function ExcelImportModal({ onClose, onImport }) {
 
   return (
     <Modal
-      title="Import Clients from Excel"
+      title="Import Client Portfolios"
       onClose={onClose}
       maxWidth="max-w-2xl"
       footer={
         <div className="flex justify-between items-center gap-2">
-          <span className="text-xs text-slate-500">
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
             {rows ? `${validRows.length} of ${rows.length} rows valid` : 'Upload a .xlsx / .xls file'}
           </span>
           <div className="flex gap-2">
@@ -291,7 +295,7 @@ export function ExcelImportModal({ onClose, onImport }) {
               disabled={!validRows.length || importing}
               className={btnPrimary}
             >
-              {importing ? 'Importing…' : `Import ${validRows.length} client${validRows.length !== 1 ? 's' : ''}`}
+              {importing ? 'Importing…' : `Import ${validRows.length} portfolio${validRows.length !== 1 ? 's' : ''}`}
             </button>
           </div>
         </div>
@@ -302,50 +306,50 @@ export function ExcelImportModal({ onClose, onImport }) {
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="w-full border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/40 rounded-xl p-8 flex flex-col items-center gap-2 transition-colors text-slate-500 hover:text-blue-600"
+          className="w-full border-2 border-dashed border-slate-300 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-600 hover:bg-blue-50/10 dark:hover:bg-blue-950/10 rounded-2xl p-8 flex flex-col items-center gap-2.5 transition-all text-slate-500 dark:text-slate-450 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer shadow-inner"
         >
-          <FileSpreadsheet size={32} />
-          <span className="font-semibold text-sm">Click to upload Excel sheet</span>
-          <span className="text-xs text-slate-400">Expects columns: Name, PAN — .xlsx or .xls</span>
+          <FileSpreadsheet size={32} className="text-slate-400 dark:text-slate-600" />
+          <span className="font-bold text-sm uppercase tracking-wider">Click to upload spreadsheet</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500 font-sans font-medium">Accepts Name and PAN Card columns — .xlsx / .xls formats</span>
         </button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
 
         {error && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 text-rose-700 text-sm border border-rose-200">
+          <div className="flex items-start gap-2.5 p-4.5 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 text-xs font-medium border border-rose-200/50 dark:border-rose-900/40 animate-fade-in">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
             {error}
           </div>
         )}
 
         {rows && (
-          <div className="overflow-auto max-h-64 rounded-lg border border-slate-200">
+          <div className="overflow-auto max-h-64 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-md">
             <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0">
+              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800 sticky top-0">
                 <tr>
-                  <th className="px-3 py-2 text-left">#</th>
-                  <th className="px-3 py-2 text-left">Name</th>
-                  <th className="px-3 py-2 text-left">PAN</th>
-                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-4 py-3 text-left w-12">#</th>
+                  <th className="px-4 py-3 text-left">Name</th>
+                  <th className="px-4 py-3 text-left">PAN</th>
+                  <th className="px-4 py-3 text-left">Status</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {rows.map((r, i) => {
                   const nameOk = !!r.name;
                   const panOk = PAN_RE.test(r.pan);
                   const ok = nameOk && panOk;
                   return (
-                    <tr key={i} className={`border-t border-slate-100 ${ok ? '' : 'bg-rose-50/50'}`}>
-                      <td className="px-3 py-1.5 text-slate-400">{r.rowNum}</td>
-                      <td className={`px-3 py-1.5 font-medium ${nameOk ? 'text-slate-800' : 'text-rose-600'}`}>
-                        {r.name || <em className="font-normal">empty</em>}
+                    <tr key={i} className={`border-t border-slate-100 dark:border-slate-800 ${ok ? 'bg-white dark:bg-slate-900' : 'bg-rose-50/20 dark:bg-rose-950/10'}`}>
+                      <td className="px-4 py-2.5 text-slate-400 dark:text-slate-500">{r.rowNum}</td>
+                      <td className={`px-4 py-2.5 font-bold ${nameOk ? 'text-slate-800 dark:text-slate-200' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {r.name || <em className="font-normal font-sans text-xs opacity-60">empty</em>}
                       </td>
-                      <td className={`px-3 py-1.5 font-mono tracking-wider ${panOk ? 'text-slate-800' : 'text-rose-600'}`}>
-                        {r.pan || <em className="font-normal font-sans tracking-normal">empty</em>}
+                      <td className={`px-4 py-2.5 font-mono tracking-wider text-xs ${panOk ? 'text-slate-800 dark:text-slate-300' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {r.pan || <em className="font-normal font-sans tracking-normal opacity-60">empty</em>}
                       </td>
-                      <td className="px-3 py-1.5">
+                      <td className="px-4 py-2.5 font-bold uppercase tracking-wider text-[10px]">
                         {ok
-                          ? <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold"><CheckCircle2 size={12} /> Valid</span>
-                          : <span className="inline-flex items-center gap-1 text-rose-600 font-semibold"><AlertCircle size={12} /> {!nameOk ? 'Missing name' : 'Invalid PAN'}</span>
+                          ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 size={12} /> Valid</span>
+                          : <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><AlertCircle size={12} /> {!nameOk ? 'Missing name' : 'Invalid PAN'}</span>
                         }
                       </td>
                     </tr>
@@ -363,13 +367,13 @@ export function ExcelImportModal({ onClose, onImport }) {
 function PreviewTile({ label, value, pill }) {
   return (
     <div>
-      <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">{label}</p>
+      <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">{label}</p>
       {pill ? (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/50 rounded-full">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-250/50 dark:ring-emerald-900/50 rounded-full">
           <CheckCircle2 size={11} /> {pill}
         </span>
       ) : (
-        <p className="text-sm font-bold text-slate-900 tabular-nums">{value}</p>
+        <p className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{value}</p>
       )}
     </div>
   );

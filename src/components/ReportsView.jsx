@@ -1,85 +1,89 @@
 import React from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { Card, Avatar, Field, selectCls } from './UI';
-import { goalIcon, monthLabel, fmtINR, fmtSip, achievementBadge, CURRENT_MONTH, CURRENT_YEAR } from '../utils/calc';
+import { goalEmoji, monthLabel, fmtINR, fmtSip, achievementBadge, CURRENT_MONTH, CURRENT_YEAR } from '../utils/calc';
 
 export default function ReportsView({ goalNames, goalFilter, setGoalFilter, timeframe, setTimeframe, rows, onOpenClient }) {
   return (
-    <div>
-      <div className="mb-5">
-        <h2 className="text-xl font-bold text-slate-900">Reports & Timelines</h2>
-        <p className="text-sm text-slate-500 mt-0.5">Track and filter client goals due within a designated timeframe</p>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white">Planning & Timeline Reports</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium">Track and filter client portfolio goals grouped by chronological target dates</p>
       </div>
-      <Card className="p-4 mb-5">
+
+      <Card className="p-5 border border-slate-200/60 dark:border-slate-800/80">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Goal Category Filter">
-            <select value={goalFilter} onChange={(e) => setGoalFilter(e.target.value)} className={selectCls}>
-              <option value="all">All Goals</option>
-              {goalNames.map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
+            <div className="relative">
+              <select value={goalFilter} onChange={(e) => setGoalFilter(e.target.value)} className={selectCls}>
+                <option value="all">All Goal Categories</option>
+                {goalNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
           </Field>
-          <Field label="Target Timeframe">
-            <select value={timeframe} onChange={(e) => setTimeframe(Number(e.target.value))} className={selectCls}>
-              <option value={1}>1 Year</option>
-              <option value={3}>3 Years</option>
-              <option value={5}>5 Years</option>
-              <option value={10}>10 Years</option>
-              <option value={15}>15 Years</option>
-              <option value={20}>20 Years</option>
-              <option value={50}>All timeframes</option>
-            </select>
+          <Field label="Target Time Horizon">
+            <div className="relative">
+              <select value={timeframe} onChange={(e) => setTimeframe(Number(e.target.value))} className={selectCls}>
+                <option value={1}>1 Year Horizon</option>
+                <option value={3}>3 Years Horizon</option>
+                <option value={5}>5 Years Horizon</option>
+                <option value={10}>10 Years Horizon</option>
+                <option value={15}>15 Years Horizon</option>
+                <option value={20}>20 Years Horizon</option>
+                <option value={50}>All timeframes</option>
+              </select>
+            </div>
           </Field>
         </div>
       </Card>
 
-      <p className="text-sm text-slate-550 mb-4">
-        Found {rows.length} {rows.length === 1 ? 'goal' : 'goals'} due on or before <span className="font-bold text-slate-700">{monthLabel(CURRENT_MONTH, CURRENT_YEAR + timeframe)}</span>
+      <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">
+        Found {rows.length} {rows.length === 1 ? 'goal target' : 'goal targets'} due on or before <span className="font-bold text-slate-800 dark:text-slate-200 underline decoration-blue-500/40 decoration-2">{monthLabel(CURRENT_MONTH, CURRENT_YEAR + timeframe)}</span>
       </p>
 
-      <Card className="overflow-hidden border border-slate-200/60">
+      <Card className="overflow-hidden border border-slate-200/60 dark:border-slate-800/80 shadow-md">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50/80 text-slate-500 text-xs font-semibold uppercase tracking-wider border-b border-slate-200">
+            <thead className="bg-slate-50/80 dark:bg-slate-950/80 text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
               <tr>
-                <th className="text-left px-5 py-3.5 font-semibold">Client</th>
-                <th className="text-left px-5 py-3.5 font-semibold">Goal</th>
-                <th className="text-right px-5 py-3.5 font-semibold">Target Date</th>
-                <th className="text-right px-5 py-3.5 font-semibold">Time Horizon</th>
-                <th className="text-right px-5 py-3.5 font-semibold">Future Cost</th>
-                <th className="text-right px-5 py-3.5 font-semibold">Additional SIP req.</th>
-                <th className="text-right px-5 py-3.5 font-semibold">Status</th>
+                <th className="text-left px-6 py-4 font-bold">Client Profile</th>
+                <th className="text-left px-6 py-4 font-bold">Goal Target</th>
+                <th className="text-right px-6 py-4 font-bold">Target Month</th>
+                <th className="text-right px-6 py-4 font-bold">Time Horizon</th>
+                <th className="text-right px-6 py-4 font-bold">Future Cost</th>
+                <th className="text-right px-6 py-4 font-bold">Additional SIP needed</th>
+                <th className="text-right px-6 py-4 font-bold">Plan Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-200/50 dark:divide-slate-800/50">
               {rows.map((r, i) => {
-                const Icon = goalIcon(r.goal.name);
                 return (
-                  <tr key={i} className="hover:bg-blue-50/20 cursor-pointer transition-colors" onClick={() => onOpenClient(r.clientId)}>
-                    <td className="px-5 py-3.5">
+                  <tr key={i} className="hover:bg-blue-50/20 dark:hover:bg-slate-800/40 cursor-pointer transition-colors" onClick={() => onOpenClient(r.clientId)}>
+                    <td className="px-6 py-3.5">
                       <div className="flex items-center gap-3">
                         <Avatar name={r.clientName} size="sm" />
-                        <span className="font-semibold text-slate-900">{r.clientName}</span>
+                        <span className="font-bold text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{r.clientName}</span>
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-slate-700 font-semibold">
+                    <td className="px-6 py-3.5 text-slate-700 dark:text-slate-350 font-bold">
                       <div className="flex items-center gap-2">
-                        <Icon size={14} className="text-blue-600 shrink-0" />
-                        {r.goal.name}
+                        <span className="text-base select-none shrink-0">{goalEmoji(r.goal.name)}</span>
+                        <span>{r.goal.name}</span>
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-right text-slate-650 tabular-nums">{monthLabel(r.goal.targetMonth || 1, r.goal.targetYear)}</td>
-                    <td className="px-5 py-3.5 text-right text-slate-650 tabular-nums">{r.calc.years >= 1 ? `${r.calc.years.toFixed(1)} yrs` : `${r.calc.months} mo`}</td>
-                    <td className="px-5 py-3.5 text-right text-slate-650 tabular-nums font-bold">{fmtINR(r.calc.futureValue)}</td>
-                    <td className="px-5 py-3.5 text-right">
+                    <td className="px-6 py-3.5 text-right text-slate-600 dark:text-slate-400 tabular-nums font-medium">{monthLabel(r.goal.targetMonth || 1, r.goal.targetYear)}</td>
+                    <td className="px-6 py-3.5 text-right text-slate-600 dark:text-slate-400 tabular-nums font-medium">{r.calc.years >= 1 ? `${r.calc.years.toFixed(1)} yrs` : `${r.calc.months} mo`}</td>
+                    <td className="px-6 py-3.5 text-right text-slate-900 dark:text-slate-100 tabular-nums font-bold">{fmtINR(r.calc.futureValue)}</td>
+                    <td className="px-6 py-3.5 text-right">
                       {r.calc.sipOnTrack ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/50 rounded-full">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/20 dark:ring-emerald-900/30 rounded-full animate-fade-in">
                           <CheckCircle2 size={11} /> On track
                         </span>
                       ) : (
-                        <span className="text-slate-600 tabular-nums font-semibold">{fmtSip(r.calc.additionalSip)}/mo</span>
+                        <span className="text-slate-700 dark:text-slate-300 tabular-nums font-bold">{fmtSip(r.calc.additionalSip)}/mo</span>
                       )}
                     </td>
-                    <td className="px-5 py-3.5 text-right">
+                    <td className="px-6 py-3.5 text-right">
                       <span className={`inline-flex items-center px-2.5 py-0.5 text-xs font-bold rounded-full ${achievementBadge(r.calc.achievementPct)}`}>
                         {r.calc.achievementPct.toFixed(1)}%
                       </span>
@@ -89,7 +93,7 @@ export default function ReportsView({ goalNames, goalFilter, setGoalFilter, time
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="text-center py-16 text-slate-400">
+                  <td colSpan="7" className="text-center py-16 text-slate-400 dark:text-slate-600">
                     No client goals match the chosen timeline or category filters
                   </td>
                 </tr>

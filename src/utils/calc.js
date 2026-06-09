@@ -12,6 +12,19 @@ export const monthsBetween = (fromM, fromY, toM, toY) => (toY - fromY) * 12 + (t
 
 export const GOAL_PRESETS = ['Emergency', 'Vacation', 'Dream Car', 'Dream Home', 'Marriage', 'Kids Education', 'Kids Marriage', 'Financial Freedom', 'Wealth Creation', 'Others'];
 
+export const GOAL_EMOJIS = {
+  'Emergency': '🛡️',
+  'Vacation': '✈️',
+  'Dream Car': '🚗',
+  'Dream Home': '🏠',
+  'Marriage': '💍',
+  'Kids Education': '🎓',
+  'Kids Marriage': '🎁',
+  'Financial Freedom': '✨',
+  'Wealth Creation': '💼',
+  'Others': '🎯',
+};
+
 const GOAL_ICONS = {
   'Emergency': Shield,
   'Vacation': Plane,
@@ -25,6 +38,7 @@ const GOAL_ICONS = {
 };
 
 export const goalIcon = (name) => GOAL_ICONS[name] || MoreHorizontal;
+export const goalEmoji = (name) => GOAL_EMOJIS[name] || '🎯';
 
 export const fmtINR = (n) => {
   if (!isFinite(n) || n === null || n === undefined) return '₹0';
@@ -45,17 +59,17 @@ export const fmtSip = (n) => {
 };
 
 export const achievementColor = (pct) => {
-  if (pct >= 99.95) return 'bg-emerald-500';
-  if (pct >= 60) return 'bg-orange-500';
-  if (pct >= 30) return 'bg-amber-500';
-  return 'bg-rose-500';
+  if (pct >= 99.95) return 'bg-green-500';
+  if (pct >= 60) return 'bg-yellow-500';
+  if (pct >= 30) return 'bg-orange-500';
+  return 'bg-red-500';
 };
 
 export const achievementBadge = (pct) => {
-  if (pct >= 99.95) return 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200';
-  if (pct >= 60) return 'bg-orange-50 text-orange-700 ring-1 ring-orange-200';
-  if (pct >= 30) return 'bg-amber-50 text-amber-700 ring-1 ring-amber-200';
-  return 'bg-rose-50 text-rose-700 ring-1 ring-rose-200';
+  if (pct >= 99.95) return 'bg-green-50 text-green-700 ring-1 ring-green-200/50 dark:bg-green-950/20 dark:text-green-400 dark:ring-green-900/30';
+  if (pct >= 60) return 'bg-yellow-50 text-yellow-800 ring-1 ring-yellow-200/50 dark:bg-yellow-950/20 dark:text-yellow-400 dark:ring-yellow-900/30';
+  if (pct >= 30) return 'bg-orange-50 text-orange-700 ring-1 ring-orange-200/50 dark:bg-orange-950/20 dark:text-orange-400 dark:ring-orange-900/30';
+  return 'bg-red-50 text-red-700 ring-1 ring-red-200/50 dark:bg-red-950/20 dark:text-red-400 dark:ring-red-900/30';
 };
 
 export const nv = (v) => (v === undefined || v === null || Number.isNaN(v)) ? '' : v;
