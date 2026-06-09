@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Users, Target, FileBarChart, Plus, ChevronLeft, Trash2, X, TrendingUp, IndianRupee,
+  Users, Target, FileBarChart, Plus, ChevronLeft, Trash2, X,
   Calendar, Percent, Search, SlidersHorizontal, Pencil, Info, Shield, Plane, Car,
-  Home, Heart, GraduationCap, Gift, Sparkles, Wallet, MoreHorizontal, CheckCircle2,
+  Home, Heart, GraduationCap, Gift, CheckCircle2,
   AlertCircle, Download, RefreshCw, Save, FileText, Sun, Moon
 } from 'lucide-react';
 
@@ -11,7 +11,7 @@ import {
   getClients, addClient, updateClient, deleteClient, addGoal, updateGoal, deleteGoal 
 } from './services/db';
 import { 
-  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween, fmtSip 
+  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween
 } from './utils/calc';
 
 // Subcomponents
@@ -113,27 +113,21 @@ export default function App() {
   const globalStats = useMemo(() => {
     const totalClients = clients.length;
     let activeGoals = 0;
-    let totalSipNeeded = 0;
-    let totalAchievementPctSum = 0;
-    let goalsCount = 0;
+    let clientsWithGoals = 0;
+    let clientsWithoutGoals = 0;
 
     clients.forEach(c => {
       const gc = c.goals ? c.goals.length : 0;
       activeGoals += gc;
-      (c.goals || []).forEach(g => {
-        const calculated = calcGoal(g);
-        totalSipNeeded += calculated.sipRequired;
-        totalAchievementPctSum += calculated.achievementPct;
-        goalsCount++;
-      });
+      if (gc > 0) clientsWithGoals++;
+      else clientsWithoutGoals++;
     });
 
-    const averageCompletion = goalsCount > 0 ? (totalAchievementPctSum / goalsCount) : 0;
     return {
       totalClients,
       activeGoals,
-      totalSipNeeded,
-      averageCompletion
+      clientsWithGoals,
+      clientsWithoutGoals,
     };
   }, [clients]);
 
@@ -272,8 +266,8 @@ export default function App() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-fade-in">
             <StatTile label="Total Clients" value={globalStats.totalClients} icon={Users} accent="blue" />
             <StatTile label="Active Goals" value={globalStats.activeGoals} icon={Target} accent="indigo" />
-            <StatTile label="Total SIP Needed" value={fmtSip(globalStats.totalSipNeeded) + '/mo'} icon={TrendingUp} accent="emerald" />
-            <StatTile label="Avg. Goal Progress" value={`${globalStats.averageCompletion.toFixed(1)}%`} icon={Sparkles} accent="amber" />
+            <StatTile label="Clients with Goals" value={globalStats.clientsWithGoals} icon={CheckCircle2} accent="emerald" />
+            <StatTile label="Clients without Goals" value={globalStats.clientsWithoutGoals} icon={AlertCircle} accent="amber" />
           </div>
         )}
 
