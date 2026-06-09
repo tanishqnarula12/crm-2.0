@@ -67,12 +67,6 @@ export async function getClients() {
       .select('*, goals(*)');
     if (error) throw error;
 
-    if (data.length === 0) {
-      // Seed Supabase if empty
-      await seedSupabase();
-      return getClients();
-    }
-
     return data.map(client => ({
       id: client.id,
       name: client.name,
@@ -96,33 +90,6 @@ export async function getClients() {
     // Seed local storage if empty
     localStorage.setItem('app-state', JSON.stringify(seedData));
     return seedData.clients;
-  }
-}
-
-async function seedSupabase() {
-  const clientsToInsert = seedData.clients.map(c => ({
-    id: c.id,
-    name: c.name,
-    pan: c.pan,
-    age: c.age,
-    assumptions: c.assumptions || ''
-  }));
-
-  const goalsToInsert = [];
-  seedData.clients.forEach(c => {
-    c.goals.forEach(g => {
-      goalsToInsert.push(mapFrontendGoal(g, c.id));
-    });
-  });
-
-  // Insert clients
-  const { error: clientError } = await supabase.from('clients').insert(clientsToInsert);
-  if (clientError) console.error('Error seeding clients:', clientError);
-
-  // Insert goals
-  if (goalsToInsert.length > 0) {
-    const { error: goalError } = await supabase.from('goals').insert(goalsToInsert);
-    if (goalError) console.error('Error seeding goals:', goalError);
   }
 }
 
