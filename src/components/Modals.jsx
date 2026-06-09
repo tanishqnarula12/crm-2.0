@@ -245,6 +245,7 @@ export function ExcelImportModal({ onClose, onImport }) {
         const headers = Object.keys(data[0]);
         const nameKey = headers.find(h => findCol(h, 'name', 'clientname', 'fullname'));
         const panKey  = headers.find(h => findCol(h, 'pan', 'panno', 'pannumber', 'pancard'));
+        const ageKey  = headers.find(h => findCol(h, 'age', 'clientage', 'years'));
 
         if (!nameKey) { setError('Could not find a "Name" column in the sheet.'); return; }
         if (!panKey)  { setError('Could not find a "PAN" column in the sheet.'); return; }
@@ -254,6 +255,7 @@ export function ExcelImportModal({ onClose, onImport }) {
             rowNum: i + 2,
             name: String(r[nameKey] || '').trim(),
             pan: String(r[panKey] || '').toUpperCase().trim(),
+            age: ageKey ? (Number(r[ageKey]) || 0) : 0,
           }))
           .filter(r => r.name || r.pan);
 
@@ -310,7 +312,7 @@ export function ExcelImportModal({ onClose, onImport }) {
         >
           <FileSpreadsheet size={32} className="text-slate-400 dark:text-slate-600" />
           <span className="font-bold text-sm uppercase tracking-wider">Click to upload spreadsheet</span>
-          <span className="text-xs text-slate-400 dark:text-slate-500 font-sans font-medium">Accepts Name and PAN Card columns — .xlsx / .xls formats</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500 font-sans font-medium">Accepts Name, PAN Card, and Age columns — .xlsx / .xls formats</span>
         </button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
 
@@ -329,6 +331,7 @@ export function ExcelImportModal({ onClose, onImport }) {
                   <th className="px-4 py-3 text-left w-12">#</th>
                   <th className="px-4 py-3 text-left">Name</th>
                   <th className="px-4 py-3 text-left">PAN</th>
+                  <th className="px-4 py-3 text-left">Age</th>
                   <th className="px-4 py-3 text-left">Status</th>
                 </tr>
               </thead>
@@ -345,6 +348,9 @@ export function ExcelImportModal({ onClose, onImport }) {
                       </td>
                       <td className={`px-4 py-2.5 font-mono tracking-wider text-xs ${panOk ? 'text-slate-800 dark:text-slate-300' : 'text-rose-600 dark:text-rose-400'}`}>
                         {r.pan || <em className="font-normal font-sans tracking-normal opacity-60">empty</em>}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600 dark:text-slate-400 tabular-nums">
+                        {r.age > 0 ? r.age : <em className="font-normal font-sans text-xs opacity-50">—</em>}
                       </td>
                       <td className="px-4 py-2.5 font-bold uppercase tracking-wider text-[10px]">
                         {ok

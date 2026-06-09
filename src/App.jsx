@@ -215,7 +215,7 @@ export default function App() {
 
   const handleImportClients = async (rows) => {
     for (const r of rows) {
-      const newClient = { id: uid(), name: r.name, pan: r.pan, age: 0 };
+      const newClient = { id: uid(), name: r.name, pan: r.pan, age: Number(r.age) || 0 };
       try {
         await addClient(newClient);
       } catch (err) {
