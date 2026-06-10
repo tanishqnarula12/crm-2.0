@@ -82,7 +82,16 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
           <div className="flex items-center gap-4">
             <Avatar name={client.name} size="lg" />
             <div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{client.name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{client.name}</h2>
+                <button
+                  onClick={onEditClient}
+                  title="Edit client details"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all cursor-pointer"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 font-medium flex items-center gap-2">
                 <span className="font-mono tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-lg text-xs border border-slate-200/40 dark:border-slate-700/40">{client.pan}</span>
                 <span className="text-slate-300 dark:text-slate-700">•</span>
@@ -91,9 +100,6 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            <button onClick={onEditClient} className={btnSecondary + ' flex-1 md:flex-none'}>
-              <Pencil size={14} /> Edit Details
-            </button>
             <button onClick={handleExport} disabled={exporting} className={btnSecondary + ' flex-1 md:flex-none disabled:opacity-60 disabled:cursor-wait'}>
               <Download size={14} className={exporting ? 'animate-bounce' : ''} /> {exporting ? 'Generating…' : 'Export PDF'}
             </button>
