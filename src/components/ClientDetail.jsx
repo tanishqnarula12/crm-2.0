@@ -57,7 +57,7 @@ const getGoalTheme = (name) => {
 export default function ClientDetail({ client, totals, onBack, onAddGoal, onSelectGoal, onDeleteGoal, onSaveAssumptions, onEditClient }) {
   const containerRef = useRef(null);
   const [exporting, setExporting] = useState(false);
-  const [includeProjection, setIncludeProjection] = useState(true);
+  const [includeProjection, setIncludeProjection] = useState(false);
 
   // Goals where more SIP is mapped than actually required (over-funded / extra SIP).
   // When this happens the "Total SIP Needed" total looks confusing because the
