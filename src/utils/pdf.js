@@ -88,7 +88,9 @@ export async function exportClientPdf(containerEl, client, includeProjection = t
   // SVG elements (Lucide icons) have SVGAnimatedString className — skip those
   clone.querySelectorAll('[class]').forEach(el => {
     if (typeof el.className !== 'string') return;
-    el.className = el.className
+    const cls = el.className;
+
+    el.className = cls
       .split(' ')
       .filter(c =>
         !c.startsWith('animate-') &&
@@ -98,23 +100,51 @@ export async function exportClientPdf(containerEl, client, includeProjection = t
         !c.startsWith('group-hover:opacity')
       )
       .join(' ');
+
+    // Force responsive grids to their multi-column layout via inline style —
+    // CSS class selectors can't reliably override Tailwind v4 @layer rules in print.
+    if (cls.includes('grid')) {
+      if (cls.includes('md:grid-cols-3') || cls.includes('lg:grid-cols-3')) {
+        el.style.display = 'grid';
+        el.style.gridTemplateColumns = 'repeat(3, minmax(0, 1fr))';
+      } else if (cls.includes('md:grid-cols-2') || cls.includes('lg:grid-cols-2')) {
+        el.style.display = 'grid';
+        el.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
+      } else if (cls.includes('md:grid-cols-4') || cls.includes('lg:grid-cols-4')) {
+        el.style.display = 'grid';
+        el.style.gridTemplateColumns = 'repeat(4, minmax(0, 1fr))';
+      }
+    }
+
+    // Apply break-inside: avoid ONLY to small tile elements (p-5 SIP tiles, p-3 KV boxes),
+    // NOT to large wrapper cards (p-6 rounded-2xl) which cause blank pages when avoided.
+    if (cls.includes('rounded-2xl') && (cls.includes(' p-5') || cls.includes(' p-3'))) {
+      el.style.breakInside = 'avoid';
+      el.style.pageBreakInside = 'avoid';
+    }
+    // Goal cards have rounded-[ (e.g. rounded-[28px]) — always avoid breaks on these
+    if (cls.includes('rounded-[')) {
+      el.style.breakInside = 'avoid';
+      el.style.pageBreakInside = 'avoid';
+    }
   });
+
+  // Sort goals by target date ascending (nearest first) — same order as the screen
+  const sortedGoals = [...(client.goals || [])].sort((a, b) =>
+    (a.targetYear * 12 + (a.targetMonth || 1)) - (b.targetYear * 12 + (b.targetMonth || 1))
+  );
 
   // When projections are on: inject table directly after each goal card,
   // then force the goals grid to single column so they flow naturally.
-  if (includeProjection && client.goals && client.goals.length > 0) {
+  if (includeProjection && sortedGoals.length > 0) {
     const goalsGrid = clone.querySelector('[class*="lg:grid-cols-2"]');
     if (goalsGrid) {
       const goalCards = Array.from(goalsGrid.children);
-      // Iterate forward — insertAdjacentHTML('afterend') on a child inserts
-      // the new node as the next sibling inside the same parent, so
-      // forward iteration keeps indices stable.
       goalCards.forEach((cardEl, i) => {
-        if (i >= client.goals.length) return;
-        const projHtml = buildGoalProjectionHTML(client.goals[i]);
+        if (i >= sortedGoals.length) return;
+        const projHtml = buildGoalProjectionHTML(sortedGoals[i]);
         if (projHtml) cardEl.insertAdjacentHTML('afterend', projHtml);
       });
-      // Stack goals+projections into a single column
       goalsGrid.style.gridTemplateColumns = '1fr';
     }
   }
@@ -152,21 +182,8 @@ export async function exportClientPdf(containerEl, client, includeProjection = t
     .animate-scale-up,
     .animate-slide-up { animation: none !important; opacity: 1 !important; transform: none !important; }
 
-    /* Force Tailwind responsive grid classes to apply regardless of viewport size.
-       Escaped colon: .md\:grid-cols-3 targets the HTML class "md:grid-cols-3" */
-    .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-    .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-    .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-    .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-
-    /* Prevent small individual tiles / cards from splitting mid-element.
-       Intentionally NOT applied to p-6 / p-5 which catches large wrapper cards
-       and causes blank pages (whole card pushed to next page). */
-    div[class*="rounded-2xl"],
-    div[class*="rounded-["] {
-      break-inside: avoid !important;
-      page-break-inside: avoid !important;
-    }
+    /* Grid columns and break-inside are set via inline styles on the cloned DOM
+       elements above — inline styles beat all CSS cascade / @layer ordering. */
 
     .print-header {
       background: #1e3a8a;

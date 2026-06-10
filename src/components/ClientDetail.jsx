@@ -151,7 +151,9 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {client.goals.map(g => {
+          {[...client.goals].sort((a, b) =>
+            (a.targetYear * 12 + (a.targetMonth || 1)) - (b.targetYear * 12 + (b.targetMonth || 1))
+          ).map(g => {
             const c = calcGoal(g);
             const theme = getGoalTheme(g.name);
             return (
