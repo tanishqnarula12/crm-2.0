@@ -35,17 +35,17 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
   }, [clients, query, ageMin, ageMax, goalsMin, goalsMax, goalSet]);
 
   const activeCount =
-    (query ? 1 : 0) +
     (ageMin !== '' || ageMax !== '' ? 1 : 0) +
     (goalsMin !== '' || goalsMax !== '' ? 1 : 0) +
     (goalSet !== 'all' ? 1 : 0);
 
   const clearAll = () => {
-    setQuery(''); setAgeMin(''); setAgeMax(''); setGoalsMin(''); setGoalsMax(''); setGoalSet('all');
+    setAgeMin(''); setAgeMax(''); setGoalsMin(''); setGoalsMax(''); setGoalSet('all');
   };
 
   return (
     <div className="space-y-6">
+      {/* Header row: title + search bar + filter toggle + add client */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Clients Directory</h2>
@@ -54,11 +54,21 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Search bar — always visible */}
+          <div className="relative">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name or PAN…"
+              className={inputCls + ' pl-9 w-56'}
+            />
+          </div>
           <button
             onClick={() => setShowFilters(s => !s)}
             className={`relative inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider border rounded-xl transition-all cursor-pointer ${
-              showFilters 
-                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/60 shadow-sm' 
+              showFilters
+                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/60 shadow-sm'
                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -69,13 +79,6 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
               </span>
             )}
           </button>
-          <button
-            onClick={onImport}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
-            title="Import clients from Excel"
-          >
-            <FileSpreadsheet size={14} /> Import Excel
-          </button>
           <button onClick={onAdd} className={btnPrimary}>
             <Plus size={14} /> Add client
           </button>
@@ -84,14 +87,7 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
 
       {showFilters && (
         <Card className="p-6 border border-blue-100 dark:border-blue-900/40 bg-blue-50/10 dark:bg-blue-950/5 shadow-md animate-scale-up">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="lg:col-span-2">
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1.5 uppercase tracking-wider">Search name or PAN</label>
-              <div className="relative">
-                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-650" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type PAN or client name to search…" className={inputCls + ' pl-10'} />
-              </div>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <Field label="Age Range">
               <div className="flex items-center gap-2">
                 <input type="number" value={ageMin} onChange={(e) => setAgeMin(e.target.value)} placeholder="Min" className={inputCls} />
@@ -99,31 +95,36 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
                 <input type="number" value={ageMax} onChange={(e) => setAgeMax(e.target.value)} placeholder="Max" className={inputCls} />
               </div>
             </Field>
-            <Field label="Goals count">
+            <Field label="Goals Count">
               <div className="flex items-center gap-2">
                 <input type="number" min="0" value={goalsMin} onChange={(e) => setGoalsMin(e.target.value)} placeholder="Min" className={inputCls} />
                 <span className="text-slate-400 dark:text-slate-600">–</span>
                 <input type="number" min="0" value={goalsMax} onChange={(e) => setGoalsMax(e.target.value)} placeholder="Max" className={inputCls} />
               </div>
             </Field>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mt-4 pt-4 border-t border-slate-200/40 dark:border-slate-800/40">
-            <div className="w-full sm:max-w-xs">
-              <Field label="Goal status">
-                <div className="relative">
-                  <select value={goalSet} onChange={(e) => setGoalSet(e.target.value)} className={selectCls}>
-                    <option value="all">All clients</option>
-                    <option value="yes">Goal set: Yes</option>
-                    <option value="no">Goal set: No</option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
-                    <SlidersHorizontal size={12} />
-                  </div>
+            <Field label="Goal Status">
+              <div className="relative">
+                <select value={goalSet} onChange={(e) => setGoalSet(e.target.value)} className={selectCls}>
+                  <option value="all">All clients</option>
+                  <option value="yes">Goal set: Yes</option>
+                  <option value="no">Goal set: No</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
+                  <SlidersHorizontal size={12} />
                 </div>
-              </Field>
-            </div>
+              </div>
+            </Field>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-200/40 dark:border-slate-800/40">
+            {/* Import Excel lives inside the filter panel */}
+            <button
+              onClick={onImport}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer w-full sm:w-auto justify-center"
+            >
+              <FileSpreadsheet size={14} /> Import Excel
+            </button>
             {activeCount > 0 && (
-              <button onClick={clearAll} className={btnGhost + ' sm:self-end'}>
+              <button onClick={clearAll} className={btnGhost}>
                 <X size={14} /> Clear filters
               </button>
             )}
