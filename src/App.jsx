@@ -265,7 +265,7 @@ export default function App() {
         {!selectedClientId && !selectedGoalName && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-fade-in">
             <StatTile label="Total Clients" value={globalStats.totalClients} icon={Users} accent="blue" />
-            <StatTile label="Active Goals" value={globalStats.activeGoals} icon={Target} accent="indigo" />
+            <StatTile label="Total Goals" value={globalStats.activeGoals} icon={Target} accent="indigo" />
             <StatTile label="Clients with Goals" value={globalStats.clientsWithGoals} icon={CheckCircle2} accent="emerald" />
             <StatTile label="Clients without Goals" value={globalStats.clientsWithoutGoals} icon={AlertCircle} accent="amber" />
           </div>
