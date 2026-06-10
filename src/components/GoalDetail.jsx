@@ -62,10 +62,9 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
           <Metric label="Goal cost (today)" value={fmtINR(goal.amount)} />
           <Metric label="Future value" value={fmtINR(c.futureValue)} />
-          <Metric label="Total SIP needed" value={fmtSip(c.sipRequired) + '/mo'} highlight />
           <Metric label="Additional SIP" value={c.sipOnTrack ? null : (fmtSip(c.additionalSip) + '/mo')} pill={c.sipOnTrack ? 'On track' : null} />
           <Metric label="Lump-sum required" value={fmtINR(c.lumpSumRequired)} />
         </div>
