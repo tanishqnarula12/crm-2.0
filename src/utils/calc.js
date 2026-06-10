@@ -13,14 +13,14 @@ export const monthsBetween = (fromM, fromY, toM, toY) => (toY - fromY) * 12 + (t
 export const GOAL_PRESETS = ['Emergency', 'Vacation', 'Dream Car', 'Dream Home', 'Marriage', 'Kids Education', 'Kids Marriage', 'Financial Freedom', 'Wealth Creation', 'Others'];
 
 export const GOAL_EMOJIS = {
-  'Emergency': '🏥',
+  'Emergency': '➕',
   'Vacation': '✈️',
   'Dream Car': '🚗',
   'Dream Home': '🏠',
   'Marriage': '💍',
   'Kids Education': '🎓',
   'Kids Marriage': '🎁',
-  'Financial Freedom': '🧓',
+  'Financial Freedom': '🪑',
   'Wealth Creation': '💼',
   'Others': '🎯',
 };
