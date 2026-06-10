@@ -82,6 +82,19 @@ export async function exportClientPdf(containerEl, client, includeProjection = t
         el.parentElement.style.pageBreakAfter = 'avoid';
       }
     }
+
+    // Planning Assumptions always starts on a fresh page
+    if (el.textContent.trim().includes('Planning Assumptions')) {
+      let node = el.parentElement;
+      while (node) {
+        if (typeof node.className === 'string' && node.className.includes('mt-6')) {
+          node.style.breakBefore = 'page';
+          node.style.pageBreakBefore = 'always';
+          break;
+        }
+        node = node.parentElement;
+      }
+    }
   });
 
   // Strip animation classes so nothing is invisible on load
