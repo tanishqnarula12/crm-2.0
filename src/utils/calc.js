@@ -159,7 +159,8 @@ export function calcGoal(goal) {
     ? Math.max(0, futureValue / Math.pow(1 + monthlyR, months) - currentInv)
     : Math.max(0, futureValue - currentInv);
 
-  const additionalSip = Math.max(0, sipRequired - currentSip);
+  // Signed difference: positive => more SIP needed, negative => over-funded (extra SIP mapped)
+  const additionalSip = sipRequired - currentSip;
   const sipOnTrack = currentSip >= sipRequired - 0.5;
 
   return { months, years, futureValue, projectedCorpus, shortfall, achievementPct, sipRequired, additionalSip, sipOnTrack, lumpSumRequired, fvOfCurrentInv, fvOfCurrentSip };

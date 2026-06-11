@@ -98,14 +98,15 @@ export default function App() {
   // Calculate totals for active client
   const totals = useMemo(() => {
     if (!selectedClient || !selectedClient.goals) return { totalSip: 0, totalAdditional: 0, totalLump: 0, totalCurrentSip: 0 };
-    let totalSip = 0, totalAdditional = 0, totalLump = 0, totalCurrentSip = 0;
+    let totalAdditional = 0, totalLump = 0, totalCurrentSip = 0;
     selectedClient.goals.forEach(g => {
       const c = calcGoal(g);
-      totalSip += c.sipRequired;
       totalAdditional += c.additionalSip;
       totalLump += c.lumpSumRequired;
       totalCurrentSip += (Number(g.currentSip) || 0);
     });
+    // Total SIP is simply Current SIP + Additional SIP (signed)
+    const totalSip = totalCurrentSip + totalAdditional;
     return { totalSip, totalAdditional, totalLump, totalCurrentSip };
   }, [selectedClient]);
 

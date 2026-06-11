@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  ChevronLeft, Download, Plus, Target, Trash2, Pencil, FileText, RefreshCw, CheckCircle2, Save, TrendingUp, IndianRupee, Info
+  ChevronLeft, Download, Plus, Target, Trash2, Pencil, FileText, RefreshCw, CheckCircle2, Save, TrendingUp, IndianRupee
 } from 'lucide-react';
 import { 
   Avatar, Card, btnPrimary, btnSecondary, btnGhost, inputCls 
@@ -58,25 +58,6 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
   const containerRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [includeProjection, setIncludeProjection] = useState(false);
-
-  // Goals where more SIP is mapped than actually required (over-funded / extra SIP).
-  // When this happens the "Total SIP Needed" total looks confusing because the
-  // surplus from these goals is set off against the requirement — surface a note.
-  const extraSipGoals = useMemo(() => {
-    if (!client.goals) return [];
-    return client.goals
-      .map(g => {
-        const c = calcGoal(g);
-        const currentSip = Number(g.currentSip) || 0;
-        return {
-          name: g.name,
-          sipRequired: c.sipRequired,
-          currentSip,
-          extra: currentSip - c.sipRequired,
-        };
-      })
-      .filter(x => x.extra > 1); // ignore floating-point noise
-  }, [client.goals]);
 
   const handleExport = async () => {
     if (exporting) return;
@@ -147,7 +128,7 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <SummaryTile label="Current SIP Allocation" value={fmtSip(totals.totalCurrentSip) + '/mo'} icon={TrendingUp} accent="blue" />
                 <SummaryTile label="Additional SIP Required" value={fmtSip(totals.totalAdditional) + '/mo'} icon={Plus} accent="indigo" />
-                <SummaryTile label="Total Monthly SIP Needed" value={fmtSip(totals.totalSip) + '/mo'} icon={CheckCircle2} accent="emerald" />
+                <SummaryTile label="Total Monthly SIP Needed" value={fmtSip(totals.totalCurrentSip + totals.totalAdditional) + '/mo'} icon={CheckCircle2} accent="emerald" />
               </div>
             </div>
 
@@ -159,43 +140,6 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
               </div>
             </div>
 
-            {/* Extra-SIP note — shown only when one or more goals are over-funded */}
-            {extraSipGoals.length > 0 && (
-              <div className="rounded-2xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20 p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Info size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
-                  <h4 className="text-sm font-black text-amber-700 dark:text-amber-400 uppercase tracking-wider">Note on Total SIP Needed</h4>
-                </div>
-                <div className="overflow-hidden rounded-xl border border-amber-200/60 dark:border-amber-900/40 bg-white dark:bg-slate-950/50">
-                  <table className="w-full text-xs">
-                    <thead className="bg-amber-100/50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider border-b border-amber-200/60 dark:border-amber-900/40">
-                      <tr>
-                        <th className="text-left px-4 py-2.5 font-bold">Goal Name</th>
-                        <th className="text-right px-4 py-2.5 font-bold">SIP Needed</th>
-                        <th className="text-right px-4 py-2.5 font-bold">Extra SIP Mapped</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-amber-100/60 dark:divide-amber-900/30">
-                      {extraSipGoals.map((g, i) => (
-                        <tr key={i}>
-                          <td className="px-4 py-2.5 font-bold text-slate-800 dark:text-slate-200">
-                            <div className="flex items-center gap-2">
-                              <span className="select-none">{goalEmoji(g.name)}</span>
-                              <span>{g.name}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-700 dark:text-slate-300">{fmtSip(g.sipRequired)}/mo</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums font-bold text-amber-700 dark:text-amber-400">{fmtSip(g.extra)}/mo</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed font-medium">
-                  The difference in Total SIP Needed is due to an extra SIP being mapped to the goal. The amount shown is the actual SIP required after adjusting (set-off) the extra SIP.
-                </p>
-              </div>
-            )}
           </div>
         )}
       </Card>
@@ -265,7 +209,7 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
                   <KV label="Current corpus" value={fmtINR(g.currentInv)} />
                   <KV label="Current SIP" value={fmtSip(g.currentSip) + '/mo'} />
                   <KV label="Total SIP needed" value={fmtSip(c.sipRequired) + '/mo'} highlight />
-                  <KV label="Additional SIP" value={c.sipOnTrack ? null : (fmtSip(c.additionalSip) + '/mo')} pill={c.sipOnTrack ? 'On track' : null} highlight={!c.sipOnTrack} />
+                  <KV label="Additional SIP" value={fmtSip(c.additionalSip) + '/mo'} highlight />
                   <div className="col-span-2">
                     <KV label="Lump-sum equivalent required today" value={fmtINR(c.lumpSumRequired)} isLump />
                   </div>
