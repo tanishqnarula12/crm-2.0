@@ -65,7 +65,7 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
         <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
           <Metric label="Goal cost (today)" value={fmtINR(goal.amount)} />
           <Metric label="Future value" value={fmtINR(c.futureValue)} />
-          <Metric label="Additional SIP" value={fmtSip(c.additionalSip) + '/mo'} />
+          <Metric label="Additional SIP" value={fmtSip(c.additionalSip) + '/mo'} negative={c.additionalSip < 0} />
           <Metric label="Lump-sum required" value={fmtINR(c.lumpSumRequired)} />
         </div>
 
@@ -204,16 +204,16 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
   );
 }
 
-function Metric({ label, value, pill, highlight }) {
+function Metric({ label, value, pill, highlight, negative }) {
   return (
-    <Card className={`p-5 hover:translate-y-[-1px] duration-300 border ${highlight ? 'border-blue-200 dark:border-blue-900/60 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 dark:from-slate-900 dark:to-slate-850' : 'border-slate-200/60 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40'}`}>
-      <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">{label}</p>
+    <Card className={`p-5 hover:translate-y-[-1px] duration-300 border ${highlight ? 'border-blue-200 dark:border-blue-900/60 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 dark:from-slate-900 dark:to-slate-850' : negative ? 'border-rose-200 dark:border-rose-900/40 bg-rose-50/30 dark:bg-rose-950/10' : 'border-slate-200/60 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40'}`}>
+      <p className={`text-[10px] font-bold mb-2 uppercase tracking-wider ${negative ? 'text-rose-500 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{label}</p>
       {pill ? (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-450 ring-1 ring-emerald-250/50 dark:ring-emerald-900/50 rounded-full">
           <CheckCircle2 size={11} /> {pill}
         </span>
       ) : (
-        <p className={`text-base font-bold tabular-nums ${highlight ? 'text-blue-800 dark:text-blue-400' : 'text-slate-900 dark:text-white'}`}>{value}</p>
+        <p className={`text-base font-bold tabular-nums ${negative ? 'text-rose-600 dark:text-rose-400' : highlight ? 'text-blue-800 dark:text-blue-400' : 'text-slate-900 dark:text-white'}`}>{value}</p>
       )}
     </Card>
   );

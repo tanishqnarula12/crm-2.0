@@ -209,7 +209,7 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
                   <KV label="Current corpus" value={fmtINR(g.currentInv)} />
                   <KV label="Current SIP" value={fmtSip(g.currentSip) + '/mo'} />
                   <KV label="Total SIP needed" value={fmtSip(c.sipRequired) + '/mo'} highlight />
-                  <KV label="Additional SIP" value={fmtSip(c.additionalSip) + '/mo'} highlight />
+                  <KV label="Additional SIP" value={fmtSip(c.additionalSip) + '/mo'} highlight negative={c.additionalSip < 0} />
                   <div className="col-span-2">
                     <KV label="Lump-sum equivalent required today" value={fmtINR(c.lumpSumRequired)} isLump />
                   </div>
@@ -414,12 +414,16 @@ function SummaryTile({ label, value, icon: Icon, accent }) {
   );
 }
 
-function KV({ label, value, pill, highlight, isLump }) {
+function KV({ label, value, pill, highlight, isLump, negative }) {
   let containerCls = 'bg-white dark:bg-slate-950 border-slate-100 dark:border-slate-800 shadow-sm';
   let labelCls = 'text-slate-400 dark:text-slate-500';
   let valueCls = 'text-slate-800 dark:text-slate-200';
 
-  if (highlight) {
+  if (highlight && negative) {
+    containerCls = 'bg-white dark:bg-slate-950 border-slate-100 dark:border-slate-800 shadow-sm';
+    labelCls = 'text-rose-600 dark:text-rose-400';
+    valueCls = 'text-rose-600 dark:text-rose-400 font-extrabold';
+  } else if (highlight) {
     containerCls = 'bg-white dark:bg-slate-950 border-slate-100 dark:border-slate-800 shadow-sm';
     labelCls = 'text-blue-600 dark:text-blue-400';
     valueCls = 'text-blue-800 dark:text-blue-300 font-extrabold';
