@@ -5,8 +5,8 @@ import {
 import { 
   Avatar, Card, btnPrimary, btnSecondary, btnGhost, inputCls 
 } from './UI';
-import { 
-  calcGoal, fmtINR, fmtFull, fmtSip, goalIcon, goalEmoji, achievementColor, generateAssumptionsText, refreshAssumptionsText, monthLabel 
+import {
+  calcGoal, fmtINR, fmtFull, fmtSip, goalIcon, goalEmoji, achievementColor, generateAssumptionsText, refreshAssumptionsText, monthLabel, goalCreatedLabel, needsKidName
 } from '../utils/calc';
 import { exportClientPdf } from '../utils/pdf';
 
@@ -178,9 +178,17 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
                       <h4 className={`font-bold ${theme.primaryText} truncate text-base ${theme.titleHover} transition-colors tracking-tight`}>
                         {g.name}
                       </h4>
+                      {needsKidName(g.name) && g.kidName && (
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+                          Kid: {g.kidName}
+                        </p>
+                      )}
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-bold uppercase tracking-wider text-[10px]">
                         Target {monthLabel(g.targetMonth || 1, g.targetYear)}
                         {c.years > 0 && ` · ${c.years >= 1 ? `${c.years.toFixed(1)} yrs` : `${c.months} mo`}`}
+                      </p>
+                      <p className="text-[10px] font-semibold tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
+                        Created {goalCreatedLabel(g)}
                       </p>
                     </div>
                   </div>

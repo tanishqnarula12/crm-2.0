@@ -12,6 +12,22 @@ export const monthsBetween = (fromM, fromY, toM, toY) => (toY - fromY) * 12 + (t
 
 export const GOAL_PRESETS = ['Emergency', 'Vacation', 'Dream Car', 'Dream Home', 'Marriage', 'Kids Education', 'Kids Marriage', 'Financial Freedom', 'Wealth Creation', 'Others'];
 
+// Goals that are tied to a specific child and therefore capture the kid's name
+export const KID_GOALS = ['Kids Education', 'Kids Marriage'];
+export const needsKidName = (name) => KID_GOALS.includes(name);
+
+// Format a full ISO timestamp as a readable date, e.g. "15 Jun 2026"
+export const fmtDate = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+// Date the goal was created — falls back to the planning anchor month/year for legacy goals
+export const goalCreatedLabel = (goal) =>
+  fmtDate(goal.createdAt) || monthLabel(goal.createdMonth || CURRENT_MONTH, goal.createdYear || CURRENT_YEAR);
+
 export const GOAL_EMOJIS = {
   'Emergency': '➕',
   'Vacation': '✈️',
@@ -71,6 +87,28 @@ export const achievementBadge = (pct) => {
   if (pct >= 30) return 'bg-orange-50 text-orange-700 ring-1 ring-orange-200/50 dark:bg-orange-950/20 dark:text-orange-400 dark:ring-orange-900/30';
   return 'bg-red-50 text-red-700 ring-1 ring-red-200/50 dark:bg-red-950/20 dark:text-red-400 dark:ring-red-900/30';
 };
+
+// Compare a goal before/after an edit and return a list of human-readable changes.
+// Each change => { label, from, to }. Used to build the goal's edit history log.
+export function buildGoalEdits(prev, next) {
+  const edits = [];
+  const numChanged = (a, b) => (Number(a) || 0) !== (Number(b) || 0);
+  const dash = (v) => (v === undefined || v === null || v === '') ? '—' : v;
+  const push = (label, from, to) => edits.push({ label, from, to });
+
+  if ((prev.name || '') !== (next.name || '')) push('Goal name', dash(prev.name), dash(next.name));
+  if ((prev.kidName || '') !== (next.kidName || '')) push("Kid's name", dash(prev.kidName), dash(next.kidName));
+  if (numChanged(prev.amount, next.amount)) push('Goal cost (today)', fmtFull(prev.amount), fmtFull(next.amount));
+  if (numChanged(prev.targetMonth, next.targetMonth) || numChanged(prev.targetYear, next.targetYear)) {
+    push('Target date', monthLabel(prev.targetMonth || 1, prev.targetYear), monthLabel(next.targetMonth || 1, next.targetYear));
+  }
+  if (numChanged(prev.inflation, next.inflation)) push('Inflation rate', `${prev.inflation}%`, `${next.inflation}%`);
+  if (numChanged(prev.expectedReturn, next.expectedReturn)) push('Expected return', `${prev.expectedReturn}%`, `${next.expectedReturn}%`);
+  if (numChanged(prev.sipIncRate, next.sipIncRate)) push('SIP step-up', `${prev.sipIncRate}%`, `${next.sipIncRate}%`);
+  if (numChanged(prev.currentInv, next.currentInv)) push('Current corpus', fmtFull(prev.currentInv), fmtFull(next.currentInv));
+  if (numChanged(prev.currentSip, next.currentSip)) push('Current SIP', fmtFull(prev.currentSip), fmtFull(next.currentSip));
+  return edits;
+}
 
 export const nv = (v) => (v === undefined || v === null || Number.isNaN(v)) ? '' : v;
 

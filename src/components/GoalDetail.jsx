@@ -1,13 +1,13 @@
 import React from 'react';
-import { 
-  ChevronLeft, Pencil, Percent, TrendingUp, Calendar, IndianRupee, Info, CheckCircle2 
+import {
+  ChevronLeft, Pencil, Percent, TrendingUp, Calendar, IndianRupee, Info, CheckCircle2, History, ArrowRight, User
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { Card, btnSecondary } from './UI';
-import { 
-  calcGoal, buildProjection, monthLabel, fmtINR, fmtSip, goalIcon, goalEmoji, achievementColor, CURRENT_YEAR, CURRENT_MONTH, MONTH_NAMES 
+import {
+  calcGoal, buildProjection, monthLabel, fmtINR, fmtSip, goalIcon, goalEmoji, achievementColor, MONTH_NAMES, goalCreatedLabel, needsKidName, fmtDate
 } from '../utils/calc';
 
 export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
@@ -48,12 +48,17 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
             </div>
             <div>
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{goal.name}</h2>
+              {needsKidName(goal.name) && goal.kidName && (
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1.5">
+                  <User size={13} /> Kid: {goal.kidName}
+                </p>
+              )}
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 font-medium flex items-center flex-wrap gap-2">
                 <span>Target {monthLabel(goal.targetMonth || 1, goal.targetYear)}</span>
                 <span className="text-slate-300 dark:text-slate-700">•</span>
                 <span>{remainingLabel}</span>
                 <span className="text-slate-300 dark:text-slate-700">•</span>
-                <span className="text-slate-400 dark:text-slate-500">Started {monthLabel(goal.createdMonth || CURRENT_MONTH, goal.createdYear || CURRENT_YEAR)}</span>
+                <span className="text-slate-400 dark:text-slate-500">Created {goalCreatedLabel(goal)}</span>
               </p>
             </div>
           </div>
@@ -200,6 +205,56 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
           </div>
         </Card>
       </div>
+
+      <ChangeLog history={goal.history} />
+    </div>
+  );
+}
+
+function fmtLogStamp(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  return `${fmtDate(iso)} · ${time}`;
+}
+
+function ChangeLog({ history }) {
+  const entries = Array.isArray(history) ? [...history].reverse() : [];
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-base font-bold text-slate-800 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
+        <History size={16} /> Edit History
+      </h3>
+      <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md">
+        {entries.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-4">
+            No edits yet. Any change to this goal's parameters will be logged here.
+          </p>
+        ) : (
+          <ol className="space-y-5">
+            {entries.map((entry, i) => (
+              <li key={i} className="relative pl-6 border-l-2 border-slate-200 dark:border-slate-800">
+                <span className="absolute -left-[7px] top-1 w-3 h-3 rounded-full bg-blue-500 dark:bg-indigo-500 ring-4 ring-white dark:ring-slate-900" />
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">
+                  {fmtLogStamp(entry.at)}
+                </p>
+                <ul className="space-y-1.5">
+                  {(entry.changes || []).map((ch, j) => (
+                    <li key={j} className="text-sm text-slate-700 dark:text-slate-300 flex flex-wrap items-center gap-1.5">
+                      <span className="font-bold text-slate-900 dark:text-white">{ch.label}</span>
+                      <span className="text-slate-400 dark:text-slate-500">changed from</span>
+                      <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 text-xs font-bold tabular-nums">{ch.from}</span>
+                      <ArrowRight size={13} className="text-slate-400 dark:text-slate-500" />
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 text-xs font-bold tabular-nums">{ch.to}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Card>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Target, ChevronLeft, CheckCircle2 } from 'lucide-react';
 import { Card, Avatar, btnSecondary } from './UI';
-import { goalIcon, goalEmoji, calcGoal, monthLabel, fmtINR, fmtSip, achievementBadge } from '../utils/calc';
+import { goalIcon, goalEmoji, calcGoal, monthLabel, fmtINR, fmtSip, achievementBadge, needsKidName } from '../utils/calc';
 
 export function GoalsOverview({ goalGroups, onSelect }) {
   return (
@@ -45,6 +45,7 @@ export function GoalsOverview({ goalGroups, onSelect }) {
 }
 
 export function GoalGroupDetail({ groupName, entries, onBack, onSelectClient }) {
+  const showKidName = needsKidName(groupName);
   return (
     <div className="space-y-6 animate-scale-up">
       <button onClick={onBack} className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group cursor-pointer">
@@ -69,6 +70,7 @@ export function GoalGroupDetail({ groupName, entries, onBack, onSelectClient }) 
             <thead className="bg-slate-50/80 dark:bg-slate-950/80 text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="text-left px-6 py-4 font-bold">Client Name</th>
+                {showKidName && <th className="text-left px-6 py-4 font-bold">Kid Name</th>}
                 <th className="text-right px-6 py-4 font-bold">Target Date</th>
                 <th className="text-right px-6 py-4 font-bold">Goal cost (today)</th>
                 <th className="text-right px-6 py-4 font-bold">Additional SIP needed</th>
@@ -86,6 +88,13 @@ export function GoalGroupDetail({ groupName, entries, onBack, onSelectClient }) 
                         <span className="font-bold text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{e.name}</span>
                       </div>
                     </td>
+                    {showKidName && (
+                      <td className="px-6 py-3.5 text-left">
+                        {e.goal.kidName
+                          ? <span className="font-semibold text-emerald-700 dark:text-emerald-400">{e.goal.kidName}</span>
+                          : <span className="text-slate-400 dark:text-slate-600">—</span>}
+                      </td>
+                    )}
                     <td className="px-6 py-3.5 text-right text-slate-600 dark:text-slate-400 tabular-nums">{monthLabel(e.goal.targetMonth || 1, e.goal.targetYear)}</td>
                     <td className="px-6 py-3.5 text-right text-slate-600 dark:text-slate-400 tabular-nums font-medium">{fmtINR(e.goal.amount)}</td>
                     <td className="px-6 py-3.5 text-right">

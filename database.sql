@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS public.goals (
     sip_inc_rate NUMERIC NOT NULL,
     current_inv NUMERIC NOT NULL,
     current_sip NUMERIC NOT NULL,
+    kid_name TEXT,
+    history JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

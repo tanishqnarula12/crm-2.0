@@ -10,8 +10,8 @@ import {
 import { 
   getClients, addClient, updateClient, deleteClient, addGoal, updateGoal, deleteGoal 
 } from './services/db';
-import { 
-  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween
+import {
+  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween, buildGoalEdits
 } from './utils/calc';
 
 // Subcomponents
@@ -408,8 +408,17 @@ export default function App() {
           initial={editingGoalId ? selectedClient.goals.find(g => g.id === editingGoalId) : null}
           onClose={() => { setShowGoalForm(false); setEditingGoalId(null); }}
           onSave={(g) => {
-            if (editingGoalId) handleUpdateGoal(selectedClient.id, editingGoalId, g);
-            else handleAddGoal(selectedClient.id, g);
+            if (editingGoalId) {
+              const prev = selectedClient.goals.find(x => x.id === editingGoalId);
+              const changes = prev ? buildGoalEdits(prev, g) : [];
+              const prevHistory = Array.isArray(prev?.history) ? prev.history : [];
+              const history = changes.length
+                ? [...prevHistory, { at: new Date().toISOString(), changes }]
+                : prevHistory;
+              handleUpdateGoal(selectedClient.id, editingGoalId, { ...g, history });
+            } else {
+              handleAddGoal(selectedClient.id, { ...g, createdAt: new Date().toISOString(), history: [] });
+            }
             setShowGoalForm(false);
             setEditingGoalId(null);
           }}

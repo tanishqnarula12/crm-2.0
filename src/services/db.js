@@ -5,7 +5,7 @@ const seedData = {
   clients: [
     { id: 'c1', name: 'Aarav Sharma', pan: 'ABCPS1234A', age: 34, assumptions: '', goals: [
       { id: 'g1', name: 'Financial Freedom', amount: 50000000, targetMonth: 4, targetYear: CURRENT_YEAR + 25, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 6, expectedReturn: 12, sipIncRate: 10, currentInv: 500000, currentSip: 25000 },
-      { id: 'g2', name: 'Kids Education', amount: 4000000, targetMonth: 6, targetYear: CURRENT_YEAR + 12, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 8, expectedReturn: 11, sipIncRate: 8, currentInv: 200000, currentSip: 15000 },
+      { id: 'g2', name: 'Kids Education', amount: 4000000, targetMonth: 6, targetYear: CURRENT_YEAR + 12, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 8, expectedReturn: 11, sipIncRate: 8, currentInv: 200000, currentSip: 15000, kidName: 'Aanya', history: [] },
     ]},
     { id: 'c2', name: 'Priya Patel', pan: 'BXYPP5678B', age: 41, assumptions: '', goals: [
       { id: 'g3', name: 'Financial Freedom', amount: 80000000, targetMonth: 3, targetYear: CURRENT_YEAR + 19, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 6, expectedReturn: 11, sipIncRate: 10, currentInv: 1500000, currentSip: 40000 },
@@ -16,7 +16,7 @@ const seedData = {
     ]},
     { id: 'c4', name: 'Sneha Iyer', pan: 'DLMPI3456D', age: 38, assumptions: '', goals: []},
     { id: 'c5', name: 'Vikram Singh', pan: 'EFGPS7890E', age: 45, assumptions: '', goals: [
-      { id: 'g6', name: 'Kids Education', amount: 6000000, targetMonth: 7, targetYear: CURRENT_YEAR + 8, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 8, expectedReturn: 11, sipIncRate: 8, currentInv: 800000, currentSip: 30000 },
+      { id: 'g6', name: 'Kids Education', amount: 6000000, targetMonth: 7, targetYear: CURRENT_YEAR + 8, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 8, expectedReturn: 11, sipIncRate: 8, currentInv: 800000, currentSip: 30000, kidName: 'Reyansh', history: [] },
       { id: 'g7', name: 'Vacation', amount: 2000000, targetMonth: 12, targetYear: CURRENT_YEAR + 3, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR, inflation: 5, expectedReturn: 8, sipIncRate: 0, currentInv: 500000, currentSip: 25000 },
     ]},
   ],
@@ -36,7 +36,10 @@ function mapDbGoal(g) {
     expectedReturn: Number(g.expected_return),
     sipIncRate: Number(g.sip_inc_rate),
     currentInv: Number(g.current_inv),
-    currentSip: Number(g.current_sip)
+    currentSip: Number(g.current_sip),
+    kidName: g.kid_name || '',
+    history: Array.isArray(g.history) ? g.history : [],
+    createdAt: g.created_at || null
   };
 }
 
@@ -55,7 +58,9 @@ function mapFrontendGoal(g, clientId) {
     expected_return: g.expectedReturn,
     sip_inc_rate: g.sipIncRate,
     current_inv: g.currentInv,
-    current_sip: g.currentSip
+    current_sip: g.currentSip,
+    kid_name: g.kidName || null,
+    history: Array.isArray(g.history) ? g.history : []
   };
 }
 
@@ -174,6 +179,8 @@ export async function updateGoal(clientId, goalId, updates) {
     if (updates.sipIncRate !== undefined) dbUpdates.sip_inc_rate = updates.sipIncRate;
     if (updates.currentInv !== undefined) dbUpdates.current_inv = updates.currentInv;
     if (updates.currentSip !== undefined) dbUpdates.current_sip = updates.currentSip;
+    if (updates.kidName !== undefined) dbUpdates.kid_name = updates.kidName || null;
+    if (updates.history !== undefined) dbUpdates.history = Array.isArray(updates.history) ? updates.history : [];
 
     const { error } = await supabase
       .from('goals')

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, CheckCircle2, Upload, AlertCircle, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Field, inputCls, selectCls, btnPrimary, btnGhost } from './UI';
-import { 
-  calcGoal, monthsBetween, monthLabel, fmtFull, fmtINR, fmtSip, nv, parseNum, GOAL_PRESETS, CURRENT_MONTH, CURRENT_YEAR, MONTH_NAMES 
+import {
+  calcGoal, monthsBetween, monthLabel, fmtFull, fmtINR, fmtSip, nv, parseNum, GOAL_PRESETS, CURRENT_MONTH, CURRENT_YEAR, MONTH_NAMES, needsKidName
 } from '../utils/calc';
 
 function Modal({ title, onClose, children, footer, maxWidth = 'max-w-md' }) {
@@ -73,6 +73,7 @@ export function GoalFormModal({ initial, onClose, onSave }) {
   const initialIsPreset = initial ? GOAL_PRESETS.includes(initial.name) && initial.name !== 'Others' : true;
   const [nameChoice, setNameChoice] = useState(initial ? (initialIsPreset ? initial.name : 'Others') : '');
   const [customName, setCustomName] = useState(initial && !initialIsPreset ? initial.name : '');
+  const [kidName, setKidName] = useState(initial ? (initial.kidName || '') : '');
   const [form, setForm] = useState(() => initial ? {
     name: initial.name,
     amount: initial.amount,
@@ -101,6 +102,7 @@ export function GoalFormModal({ initial, onClose, onSave }) {
   
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const effectiveName = nameChoice === 'Others' ? customName.trim() : nameChoice;
+  const showKidName = needsKidName(effectiveName);
   const previewCalc = calcGoal({ ...form, name: effectiveName });
   const targetBeforeStart = monthsBetween(form.createdMonth, form.createdYear, form.targetMonth, form.targetYear) <= 0;
 
@@ -109,6 +111,7 @@ export function GoalFormModal({ initial, onClose, onSave }) {
     const normalized = {
       ...form,
       name: effectiveName,
+      kidName: showKidName ? kidName.trim() : '',
       amount: Number(form.amount) || 0,
       inflation: Number(form.inflation) || 0,
       expectedReturn: Number(form.expectedReturn) || 0,
@@ -158,6 +161,17 @@ export function GoalFormModal({ initial, onClose, onSave }) {
               placeholder="Enter custom goal description"
               className={inputCls + ' mt-2 animate-fade-in'}
             />
+          )}
+          {showKidName && (
+            <div className="mt-2 animate-fade-in">
+              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Kid's Name</label>
+              <input
+                value={kidName}
+                onChange={(e) => setKidName(e.target.value)}
+                placeholder="e.g. Aanya"
+                className={inputCls}
+              />
+            </div>
           )}
         </Field>
         <Field label="Target cost today (₹)">
