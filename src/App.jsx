@@ -3,7 +3,7 @@ import {
   Users, Target, FileBarChart, Plus, ChevronLeft, Trash2, X,
   Calendar, Percent, Search, SlidersHorizontal, Pencil, Info, Shield, Plane, Car,
   Home, Heart, GraduationCap, Gift, CheckCircle2,
-  AlertCircle, Download, RefreshCw, Save, FileText, Sun, Moon
+  AlertCircle, Download, RefreshCw, Save, FileText, Sun, Moon, LogOut
 } from 'lucide-react';
 
 // DB Service & Calculation Utils
@@ -22,14 +22,30 @@ import { GoalsOverview, GoalGroupDetail } from './components/GoalsOverview';
 import ReportsView from './components/ReportsView';
 import { ClientFormModal, GoalFormModal, ExcelImportModal } from './components/Modals';
 import { StatTile } from './components/UI';
+import Login from './components/Login';
+import { isAuthenticated, setAuthenticated, clearAuthentication } from './utils/auth';
 
 // Assets
 import logoImg from './assets/logo.png';
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => isAuthenticated());
   const [clients, setClients] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState('clients');
+
+  const handleLogin = () => {
+    setAuthenticated();
+    setAuthed(true);
+  };
+
+  const handleLogout = () => {
+    clearAuthentication();
+    setAuthed(false);
+    setSelectedClientId(null);
+    setSelectedGoalId(null);
+    setSelectedGoalName(null);
+  };
   
   // Selection States
   const [selectedClientId, setSelectedClientId] = useState(null);
@@ -76,8 +92,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (authed) loadData();
+  }, [authed]);
 
   const selectedClient = clients.find(c => c.id === selectedClientId);
   const selectedGoal = selectedClient?.goals?.find(g => g.id === selectedGoalId);
@@ -226,6 +242,10 @@ export default function App() {
     await loadData();
   };
 
+  if (!authed) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   if (!loaded) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-500 gap-4">
@@ -255,6 +275,13 @@ export default function App() {
               title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
               {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-900/40 transition-all shadow-sm cursor-pointer"
+              title="Sign out"
+            >
+              <LogOut size={15} />
             </button>
           </div>
         </div>
