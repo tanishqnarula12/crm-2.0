@@ -6,7 +6,7 @@ import {
   Avatar, Card, Field, inputCls, selectCls, btnPrimary, btnGhost 
 } from './UI';
 
-export default function ClientList({ clients, onSelect, onAdd, onDelete, onImport }) {
+export default function ClientList({ clients, onSelect, onAdd, onDelete, onImport, isViewer }) {
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState('');
   const [ageMin, setAgeMin] = useState('');
@@ -79,9 +79,11 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
               </span>
             )}
           </button>
-          <button onClick={onAdd} className={btnPrimary}>
-            <Plus size={14} /> Add client
-          </button>
+          {!isViewer && (
+            <button onClick={onAdd} className={btnPrimary}>
+              <Plus size={14} /> Add client
+            </button>
+          )}
         </div>
       </div>
 
@@ -117,12 +119,14 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-200/40 dark:border-slate-800/40">
             {/* Import Excel lives inside the filter panel */}
-            <button
-              onClick={onImport}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer w-full sm:w-auto justify-center"
-            >
-              <FileSpreadsheet size={14} /> Import Excel
-            </button>
+            {!isViewer && (
+              <button
+                onClick={onImport}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer w-full sm:w-auto justify-center"
+              >
+                <FileSpreadsheet size={14} /> Import Excel
+              </button>
+            )}
             {activeCount > 0 && (
               <button onClick={clearAll} className={btnGhost}>
                 <X size={14} /> Clear filters
@@ -169,13 +173,15 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
                     )}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onDelete(c.id); }} 
-                      className="text-slate-400 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 p-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all active:scale-95 cursor-pointer"
-                      title="Delete client profile"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {!isViewer && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(c.id); }}
+                        className="text-slate-400 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 p-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all active:scale-95 cursor-pointer"
+                        title="Delete client profile"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

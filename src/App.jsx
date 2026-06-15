@@ -23,25 +23,28 @@ import ReportsView from './components/ReportsView';
 import { ClientFormModal, GoalFormModal, ExcelImportModal } from './components/Modals';
 import { StatTile } from './components/UI';
 import Login from './components/Login';
-import { isAuthenticated, setAuthenticated, clearAuthentication } from './utils/auth';
+import { isAuthenticated, setAuthenticated, clearAuthentication, isViewerRole } from './utils/auth';
 
 // Assets
 import logoImg from './assets/logo.png';
 
 export default function App() {
   const [authed, setAuthed] = useState(() => isAuthenticated());
+  const [isViewer, setIsViewer] = useState(() => isViewerRole());
   const [clients, setClients] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState('clients');
 
-  const handleLogin = () => {
-    setAuthenticated();
+  const handleLogin = (role) => {
+    setAuthenticated(role);
+    setIsViewer(role === 'viewer');
     setAuthed(true);
   };
 
   const handleLogout = () => {
     clearAuthentication();
     setAuthed(false);
+    setIsViewer(false);
     setSelectedClientId(null);
     setSelectedGoalId(null);
     setSelectedGoalName(null);
@@ -339,6 +342,7 @@ export default function App() {
               onAdd={() => setShowAddClient(true)}
               onDelete={handleDeleteClient}
               onImport={() => setShowImportExcel(true)}
+              isViewer={isViewer}
             />
           </div>
         )}
@@ -354,6 +358,7 @@ export default function App() {
               onDeleteGoal={(gid) => handleDeleteGoal(selectedClientId, gid)}
               onSaveAssumptions={(text) => handleSaveAssumptions(selectedClientId, text)}
               onEditClient={() => { setEditingClientId(selectedClientId); setShowAddClient(true); }}
+              isViewer={isViewer}
             />
           </div>
         )}
@@ -365,6 +370,7 @@ export default function App() {
               clientName={selectedClient.name}
               onBack={() => setSelectedGoalId(null)}
               onEdit={() => { setEditingGoalId(selectedGoalId); setShowGoalForm(true); }}
+              isViewer={isViewer}
             />
           </div>
         )}

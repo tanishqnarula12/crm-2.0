@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { LogIn, Eye, EyeOff, AlertCircle, Lock } from 'lucide-react';
 import { Card, inputCls, btnPrimary } from './UI';
-import { AUTH_EMAIL, AUTH_PASSWORD } from '../utils/auth';
+import { findAccount } from '../utils/auth';
 import logoImg from '../assets/logo.png';
 
 export default function Login({ onLogin }) {
@@ -12,11 +12,10 @@ export default function Login({ onLogin }) {
 
   const submit = (e) => {
     e.preventDefault();
-    const emailOk = email.trim().toLowerCase() === AUTH_EMAIL.toLowerCase();
-    const passOk = password === AUTH_PASSWORD;
-    if (emailOk && passOk) {
+    const account = findAccount(email, password);
+    if (account) {
       setError('');
-      onLogin();
+      onLogin(account.role);
     } else {
       setError('Invalid email or password. Access is restricted to authorised accounts only.');
     }

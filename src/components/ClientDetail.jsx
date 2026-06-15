@@ -54,7 +54,7 @@ const getGoalTheme = (name) => {
   };
 };
 
-export default function ClientDetail({ client, totals, onBack, onAddGoal, onSelectGoal, onDeleteGoal, onSaveAssumptions, onEditClient }) {
+export default function ClientDetail({ client, totals, onBack, onAddGoal, onSelectGoal, onDeleteGoal, onSaveAssumptions, onEditClient, isViewer }) {
   const containerRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [includeProjection, setIncludeProjection] = useState(false);
@@ -84,13 +84,15 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{client.name}</h2>
-                <button
-                  onClick={onEditClient}
-                  title="Edit client details"
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all cursor-pointer"
-                >
-                  <Pencil size={14} />
-                </button>
+                {!isViewer && (
+                  <button
+                    onClick={onEditClient}
+                    title="Edit client details"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all cursor-pointer"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                )}
               </div>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 font-medium flex items-center gap-2">
                 <span className="font-mono tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-lg text-xs border border-slate-200/40 dark:border-slate-700/40">{client.pan}</span>
@@ -114,9 +116,11 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
             >
               <TrendingUp size={12} /> {includeProjection ? 'Projections: On' : 'Projections: Off'}
             </button>
-            <button onClick={onAddGoal} className={btnPrimary + ' flex-1 md:flex-none'}>
-              <Plus size={14} /> Add goal
-            </button>
+            {!isViewer && (
+              <button onClick={onAddGoal} className={btnPrimary + ' flex-1 md:flex-none'}>
+                <Plus size={14} /> Add goal
+              </button>
+            )}
           </div>
         </div>
 
@@ -192,13 +196,15 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
                       </p>
                     </div>
                   </div>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); onDeleteGoal(g.id); }} 
-                    className="text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 p-2 rounded-xl hover:bg-rose-50/50 dark:hover:bg-rose-950/30 transition-all opacity-0 group-hover:opacity-100 cursor-pointer active:scale-95"
-                    title="Delete goal"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {!isViewer && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeleteGoal(g.id); }}
+                      className="text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 p-2 rounded-xl hover:bg-rose-50/50 dark:hover:bg-rose-950/30 transition-all opacity-0 group-hover:opacity-100 cursor-pointer active:scale-95"
+                      title="Delete goal"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
 
                 <div>
@@ -229,7 +235,7 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
       )}
 
       <div className="mt-6">
-        <AssumptionsSection client={client} onSave={onSaveAssumptions} />
+        <AssumptionsSection client={client} onSave={onSaveAssumptions} isViewer={isViewer} />
       </div>
     </div>
   );
@@ -261,7 +267,7 @@ const getQualitativeNotes = (text, client) => {
   return cleaned;
 };
 
-function AssumptionsSection({ client, onSave }) {
+function AssumptionsSection({ client, onSave, isViewer }) {
   const savedText = client.assumptions;
   const hasSaved = typeof savedText === 'string' && savedText.length > 0;
   const generated = useMemo(() => generateAssumptionsText(client), [client]);
@@ -306,7 +312,7 @@ function AssumptionsSection({ client, onSave }) {
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium font-sans">Growth and forecasting guidelines used for portfolio projections</p>
           </div>
         </div>
-        {!editing && (
+        {!editing && !isViewer && (
           <button onClick={startEdit} className={btnSecondary}>
             <Pencil size={14} /> Edit Notes
           </button>

@@ -10,7 +10,7 @@ import {
   calcGoal, buildProjection, monthLabel, fmtINR, fmtSip, goalIcon, goalEmoji, achievementColor, MONTH_NAMES, goalCreatedLabel, needsKidName, fmtDate
 } from '../utils/calc';
 
-export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
+export default function GoalDetail({ goal, clientName, onBack, onEdit, isViewer }) {
   const c = calcGoal(goal);
   const projection = buildProjection(goal);
   const remainingLabel = c.years >= 1 ? `${c.years.toFixed(1)} years to go` : c.months > 0 ? `${c.months} months to go` : 'Due now';
@@ -62,9 +62,11 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit }) {
               </p>
             </div>
           </div>
-          <button onClick={onEdit} className={btnSecondary + ' w-full sm:w-auto'}>
-            <Pencil size={14} /> Edit Details
-          </button>
+          {!isViewer && (
+            <button onClick={onEdit} className={btnSecondary + ' w-full sm:w-auto'}>
+              <Pencil size={14} /> Edit Details
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
