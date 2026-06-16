@@ -112,7 +112,6 @@ export default function App() {
   // Whenever either a goals-view client or an asset-allocation-view client is open,
   // we're "inside" a single client's profile — swap the main tab bar for a per-client sub-nav.
   const profileClientId = selectedClientId || assetClientId;
-  const profileClient = clients.find(c => c.id === profileClientId);
   const inClientProfile = Boolean(profileClientId);
 
   const goToGoalMapping = (clientId) => {
@@ -407,10 +406,6 @@ export default function App() {
                 <ChevronLeft size={14} />
                 Back to Clients
               </button>
-              <span className="hidden sm:inline text-slate-300 dark:text-slate-700 px-1">|</span>
-              <span className="hidden sm:inline px-2 text-xs font-bold text-slate-400 dark:text-slate-500 truncate max-w-[140px]">
-                {profileClient?.name}
-              </span>
               <button
                 onClick={() => goToGoalMapping(profileClientId)}
                 className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
@@ -513,7 +508,6 @@ export default function App() {
           <div className="animate-scale-up">
             <AssetAllocationDetail
               client={assetClient}
-              onBack={() => setAssetClientId(null)}
               onEdit={() => setShowAllocModal(true)}
               onSaveRemark={(remark) => handleSaveAllocation(assetClientId, { remark })}
               isViewer={isViewer}

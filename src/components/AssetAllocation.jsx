@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Wallet, PieChart as PieIcon, ChevronLeft, Pencil, Plus, Search, Scale,
+  Wallet, PieChart as PieIcon, Pencil, Plus, Search, Scale,
   TrendingUp, Home, CreditCard, MessageSquare, History, ArrowRight, Save, Layers
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
@@ -112,7 +112,7 @@ export function AssetAllocationList({ clients, onSelect }) {
 // ===========================================================================
 // DETAIL — one client's full allocation profile
 // ===========================================================================
-export function AssetAllocationDetail({ client, onBack, onEdit, onSaveRemark, isViewer }) {
+export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }) {
   const alloc = useMemo(() => normalizeAllocation(client.assetAllocation), [client.assetAllocation]);
   const t = useMemo(() => allocationTotals(alloc), [alloc]);
   const allocated = hasAllocation(client);
@@ -130,10 +130,6 @@ export function AssetAllocationDetail({ client, onBack, onEdit, onSaveRemark, is
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group cursor-pointer">
-        <ChevronLeft size={16} className="transition-transform group-hover:translate-x-[-2px]" /> Back to asset allocation
-      </button>
-
       {/* Hero */}
       <Card className="p-6 border border-slate-200/60 dark:border-slate-800/80">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
