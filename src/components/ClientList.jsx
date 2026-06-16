@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Users, Plus, X, SlidersHorizontal, Search, Trash2, CheckCircle2, AlertCircle, FileSpreadsheet
+  Users, Plus, X, SlidersHorizontal, Search, Trash2, CheckCircle2, AlertCircle, FileSpreadsheet, PieChart, Wallet
 } from 'lucide-react';
-import { 
-  Avatar, Card, Field, inputCls, selectCls, btnPrimary, btnGhost 
+import {
+  Avatar, Card, Field, inputCls, selectCls, btnPrimary, btnGhost
 } from './UI';
+import { hasAllocation } from '../utils/assets';
 
 export default function ClientList({ clients, onSelect, onAdd, onDelete, onImport, isViewer }) {
   const [showFilters, setShowFilters] = useState(false);
@@ -14,6 +15,7 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
   const [goalsMin, setGoalsMin] = useState('');
   const [goalsMax, setGoalsMax] = useState('');
   const [goalSet, setGoalSet] = useState('all');
+  const [allocSet, setAllocSet] = useState('all');
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -30,17 +32,23 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
       if (gMax !== null && gc > gMax) return false;
       if (goalSet === 'yes' && gc === 0) return false;
       if (goalSet === 'no' && gc > 0) return false;
+      if (allocSet !== 'all') {
+        const allocated = hasAllocation(c);
+        if (allocSet === 'yes' && !allocated) return false;
+        if (allocSet === 'no' && allocated) return false;
+      }
       return true;
     });
-  }, [clients, query, ageMin, ageMax, goalsMin, goalsMax, goalSet]);
+  }, [clients, query, ageMin, ageMax, goalsMin, goalsMax, goalSet, allocSet]);
 
   const activeCount =
     (ageMin !== '' || ageMax !== '' ? 1 : 0) +
     (goalsMin !== '' || goalsMax !== '' ? 1 : 0) +
-    (goalSet !== 'all' ? 1 : 0);
+    (goalSet !== 'all' ? 1 : 0) +
+    (allocSet !== 'all' ? 1 : 0);
 
   const clearAll = () => {
-    setAgeMin(''); setAgeMax(''); setGoalsMin(''); setGoalsMax(''); setGoalSet('all');
+    setAgeMin(''); setAgeMax(''); setGoalsMin(''); setGoalsMax(''); setGoalSet('all'); setAllocSet('all');
   };
 
   return (
@@ -116,6 +124,18 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
                 </div>
               </div>
             </Field>
+            <Field label="Asset Allocation Status">
+              <div className="relative">
+                <select value={allocSet} onChange={(e) => setAllocSet(e.target.value)} className={selectCls}>
+                  <option value="all">All clients</option>
+                  <option value="yes">Allocation set: Yes</option>
+                  <option value="no">Allocation set: No</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
+                  <SlidersHorizontal size={12} />
+                </div>
+              </div>
+            </Field>
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-200/40 dark:border-slate-800/40">
             {/* Import Excel lives inside the filter panel */}
@@ -145,7 +165,8 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
                 <th className="text-left px-6 py-4 font-bold">PAN Card</th>
                 <th className="text-left px-6 py-4 font-bold">Age</th>
                 <th className="text-left px-6 py-4 font-bold">Goals Defined</th>
-                <th className="text-left px-6 py-4 font-bold">Portfolio Status</th>
+                <th className="text-left px-6 py-4 font-bold">Goal Status</th>
+                <th className="text-left px-6 py-4 font-bold">Asset Allocation Status</th>
                 <th className="px-6 py-4 w-16"></th>
               </tr>
             </thead>
@@ -164,11 +185,22 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
                   <td className="px-6 py-4">
                     {c.goals && c.goals.length > 0 ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-200/50 dark:ring-emerald-900/30 rounded-full">
-                        <CheckCircle2 size={11} /> Active
+                        <CheckCircle2 size={11} /> Yes
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 ring-1 ring-slate-200/50 dark:ring-slate-700/50 rounded-full">
-                        <AlertCircle size={11} /> No goals
+                        <AlertCircle size={11} /> No
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
+                    {hasAllocation(c) ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-200/50 dark:ring-emerald-900/30 rounded-full">
+                        <PieChart size={11} /> Yes
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 ring-1 ring-slate-200/50 dark:ring-slate-700/50 rounded-full">
+                        <Wallet size={11} /> No
                       </span>
                     )}
                   </td>
@@ -187,7 +219,7 @@ export default function ClientList({ clients, onSelect, onAdd, onDelete, onImpor
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="text-center py-20 text-slate-400 dark:text-slate-600">
+                  <td colSpan="7" className="text-center py-20 text-slate-400 dark:text-slate-600">
                     {clients.length === 0 ? (
                       <div className="flex flex-col items-center gap-3 animate-fade-in">
                         <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-900 flex items-center justify-center text-slate-300 dark:text-slate-800">

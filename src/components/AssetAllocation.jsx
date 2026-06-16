@@ -7,8 +7,8 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card, Avatar, btnPrimary, btnSecondary, btnGhost, inputCls } from './UI';
 import { fmtINR, fmtFull, fmtDate } from '../utils/calc';
 import {
-  ASSET_SCHEMA, normalizeAllocation, allocationTotals, sectionTotal, filledGroupItems,
-  hasAllocation, SECTION_COLORS, FIN_GROUP_COLORS, fmtPct, getSection
+  normalizeAllocation, allocationTotals, filledItems, groupComposition,
+  hasAllocation, SECTION_COLORS, fmtPct
 } from '../utils/assets';
 
 const tooltipStyle = {
@@ -117,16 +117,9 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
   const t = useMemo(() => allocationTotals(alloc), [alloc]);
   const allocated = hasAllocation(client);
 
-  const compositionData = [
-    { name: 'Financial Assets', value: t.financial, color: SECTION_COLORS.financial },
-    { name: 'Physical Assets', value: t.physical, color: SECTION_COLORS.physical },
-  ].filter(d => d.value > 0);
-
-  const financialData = [
-    { name: 'Equity', value: t.equity, color: FIN_GROUP_COLORS.equity },
-    { name: 'Debt', value: t.debt, color: FIN_GROUP_COLORS.debt },
-    { name: 'Commodity', value: t.commodity, color: FIN_GROUP_COLORS.commodity },
-  ].filter(d => d.value > 0);
+  const finRows = useMemo(() => groupComposition(alloc, 'financial'), [alloc]);
+  const phyRows = useMemo(() => groupComposition(alloc, 'physical'), [alloc]);
+  const liaItems = useMemo(() => filledItems(alloc, 'liabilities'), [alloc]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -177,36 +170,44 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
         </Card>
       ) : (
         <>
-          {/* Allocation charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {compositionData.length > 0 && (
-              <Donut
-                title="Asset Composition"
-                icon={Layers}
-                subtitle="Total Assets"
-                centerValue={fmtINR(t.totalAssets)}
-                data={compositionData}
-                whole={t.totalAssets}
-              />
-            )}
-            {financialData.length > 0 && (
-              <Donut
-                title="Financial Investment Allocation"
-                icon={PieIcon}
-                subtitle="Financial"
-                centerValue={fmtINR(t.financial)}
-                data={financialData}
-                whole={t.financial}
-              />
-            )}
-          </div>
+          {/* Net Worth Composition — the single headline pie */}
+          <NetWorthComposition t={t} />
 
-          {/* Holdings breakdown per section */}
-          <div className="space-y-6">
-            {ASSET_SCHEMA.map(section => (
-              <HoldingsCard key={section.id} alloc={alloc} sectionId={section.id} />
-            ))}
-          </div>
+          {/* Asset Composition — financial & physical, broken down by class */}
+          <section className="space-y-4">
+            <SectionHeading icon={Layers} title="Asset Composition" hint="How total assets split across classes" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <CompositionCard
+                title="Financial Assets"
+                icon={TrendingUp}
+                accent="indigo"
+                total={t.financial}
+                rows={finRows}
+                emptyText="No financial assets recorded."
+              />
+              <CompositionCard
+                title="Physical Assets"
+                icon={Home}
+                accent="amber"
+                total={t.physical}
+                rows={phyRows}
+                emptyText="No physical assets recorded."
+              />
+            </div>
+          </section>
+
+          {/* Liabilities Composition — each loan / payable */}
+          <section className="space-y-4">
+            <SectionHeading icon={CreditCard} title="Liabilities Composition" hint="Outstanding loans & payables" />
+            <CompositionCard
+              title="Loans & Liabilities"
+              icon={CreditCard}
+              accent="rose"
+              total={t.liabilities}
+              rows={liaItems.map(it => ({ id: it.label, label: it.label, amount: it.amount, color: SECTION_COLORS.liabilities, custom: it.isCustom }))}
+              emptyText="No liabilities recorded — this client is debt-free. 🎉"
+            />
+          </section>
         </>
       )}
 
@@ -238,116 +239,124 @@ function NetTile({ label, value, accent, big, negative, icon: Icon }) {
   );
 }
 
-// --- Donut chart card ----------------------------------------------------
-function Donut({ title, subtitle, centerValue, data, whole, icon: Icon }) {
+// --- Section heading (icon + title + hint) -------------------------------
+function SectionHeading({ icon: Icon, title, hint }) {
   return (
-    <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md">
-      <h3 className="text-base font-bold text-slate-800 dark:text-slate-300 flex items-center gap-2 mb-4">
-        {Icon && <Icon size={16} className="text-slate-400 dark:text-slate-500" />} {title}
-      </h3>
-      <div className="flex flex-col sm:flex-row items-center gap-6">
-        <div className="relative w-48 h-48 shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={58} outerRadius={84} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
-                {data.map((d, i) => <Cell key={i} fill={d.color} />)}
-              </Pie>
-              <Tooltip formatter={(v, n) => [fmtINR(v), n]} contentStyle={tooltipStyle} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{subtitle}</span>
-            <span className="text-base font-black text-slate-900 dark:text-white tabular-nums">{centerValue}</span>
-          </div>
-        </div>
-        <div className="flex-1 w-full space-y-2.5">
-          {data.map((d, i) => (
-            <div key={i} className="flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1 truncate">{d.name}</span>
-              <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(d.value)}</span>
-              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 tabular-nums w-14 text-right">{fmtPct(d.value, whole)}</span>
-            </div>
-          ))}
-        </div>
+    <div className="flex items-center gap-2.5">
+      <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center shrink-0">
+        <Icon size={16} />
       </div>
-    </Card>
-  );
-}
-
-// --- Holdings card (grouped by sub-category, like the reference tree) ----
-function HoldingsCard({ alloc, sectionId }) {
-  const section = getSection(sectionId);
-  const total = sectionTotal(alloc, sectionId);
-  const Icon = section.icon;
-  const accentColor = SECTION_COLORS[sectionId];
-  const customItems = (alloc.custom[sectionId] || []).filter(x => x.amount > 0).sort((a, b) => b.amount - a.amount);
-
-  // Max single item value across the section for bar scaling
-  let maxVal = 0;
-  section.groups.forEach(g => filledGroupItems(alloc, sectionId, g.id).forEach(it => { if (it.amount > maxVal) maxVal = it.amount; }));
-  customItems.forEach(it => { if (it.amount > maxVal) maxVal = it.amount; });
-
-  const groupsWithItems = section.groups
-    .map(g => ({ group: g, items: filledGroupItems(alloc, sectionId, g.id) }))
-    .filter(x => x.items.length > 0);
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-base font-bold text-slate-800 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-        <Icon size={16} /> {section.title}
-        <span className="ml-auto text-sm font-black tabular-nums normal-case tracking-normal" style={{ color: accentColor }}>{fmtINR(total)}</span>
-      </h3>
-      <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md">
-        {total === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-4">Nothing recorded in {section.title.toLowerCase()}.</p>
-        ) : (
-          <div className="space-y-6">
-            {groupsWithItems.map(({ group, items }) => {
-              const gTotal = items.reduce((s, it) => s + it.amount, 0);
-              return (
-                <div key={group.id} className="space-y-3">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <h4 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{group.title}</h4>
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 tabular-nums">{fmtINR(gTotal)} · {fmtPct(gTotal, total)}</span>
-                  </div>
-                  <div className="space-y-2.5">
-                    {items.map(it => <HoldingRow key={it.label} label={it.label} amount={it.amount} pctOf={total} max={maxVal} color={accentColor} />)}
-                  </div>
-                </div>
-              );
-            })}
-
-            {customItems.length > 0 && (
-              <div className="space-y-3">
-                <h4 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Custom</h4>
-                <div className="space-y-2.5">
-                  {customItems.map(it => <HoldingRow key={it.id} label={it.label} amount={it.amount} pctOf={total} max={maxVal} color={accentColor} custom />)}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
+      <div className="min-w-0">
+        <h3 className="text-base font-bold text-slate-800 dark:text-slate-200 leading-tight">{title}</h3>
+        {hint && <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium leading-tight">{hint}</p>}
+      </div>
     </div>
   );
 }
 
-function HoldingRow({ label, amount, pctOf, max, color, custom }) {
-  const width = max > 0 ? Math.max(3, (amount / max) * 100) : 0;
+// --- Net Worth Composition — headline pie (financial / physical / liabilities)
+function NetWorthComposition({ t }) {
+  const data = [
+    { name: 'Financial Assets', value: t.financial, color: SECTION_COLORS.financial },
+    { name: 'Physical Assets', value: t.physical, color: SECTION_COLORS.physical },
+    { name: 'Liabilities', value: t.liabilities, color: SECTION_COLORS.liabilities },
+  ].filter(d => d.value > 0);
+  const gross = t.financial + t.physical + t.liabilities;
+
+  return (
+    <section className="space-y-4">
+      <SectionHeading icon={PieIcon} title="Net Worth Composition" hint="Assets vs liabilities at a glance" />
+      <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md">
+        {gross === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-6">No values recorded yet.</p>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-8">
+            <div className="relative w-56 h-56 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={64} outerRadius={92} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
+                    {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v, n) => [fmtINR(v), n]} contentStyle={tooltipStyle} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Net Worth</span>
+                <span className={`text-xl font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{fmtINR(t.netWorth)}</span>
+              </div>
+            </div>
+            <div className="flex-1 w-full space-y-3">
+              {data.map((d, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1 truncate">{d.name}</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(d.value)}</span>
+                  <span className="text-xs font-bold text-slate-400 dark:text-slate-500 tabular-nums w-14 text-right">{fmtPct(d.value, gross)}</span>
+                </div>
+              ))}
+              <div className="pt-3 mt-1 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Assets</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(t.totalAssets)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Net Worth</span>
+                  <span className={`text-base font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{fmtFull(t.netWorth)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+    </section>
+  );
+}
+
+// --- Composition card (financial / physical groups, or liability items) --
+const CARD_ACCENTS = {
+  indigo: { ring: 'border-indigo-200/60 dark:border-indigo-900/40', icon: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400', text: 'text-indigo-700 dark:text-indigo-400' },
+  amber: { ring: 'border-amber-200/60 dark:border-amber-900/40', icon: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400', text: 'text-amber-700 dark:text-amber-400' },
+  rose: { ring: 'border-rose-200/60 dark:border-rose-900/40', icon: 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400', text: 'text-rose-700 dark:text-rose-400' },
+};
+
+function CompositionCard({ title, icon: Icon, accent, total, rows, emptyText }) {
+  const ac = CARD_ACCENTS[accent] || CARD_ACCENTS.indigo;
+  return (
+    <Card className={`p-6 border shadow-md flex flex-col ${ac.ring}`}>
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${ac.icon}`}><Icon size={16} /></div>
+          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{title}</h4>
+        </div>
+        <span className={`text-lg font-black tabular-nums shrink-0 ${ac.text}`}>{fmtINR(total)}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-6">{emptyText}</p>
+      ) : (
+        <div className="space-y-3.5">
+          {rows.map(r => <CompositionRow key={r.id} label={r.label} amount={r.amount} color={r.color} total={total} custom={r.custom} />)}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function CompositionRow({ label, amount, color, total, custom }) {
+  const pct = total > 0 ? (amount / total) * 100 : 0;
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-3 mb-1">
-        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 truncate flex items-center gap-1.5">
-          {label}
-          {custom && <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">custom</span>}
+      <div className="flex items-center justify-between gap-3 mb-1.5">
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 truncate">{label}</span>
+          {custom && <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded shrink-0">custom</span>}
         </span>
         <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums shrink-0">
-          {fmtINR(amount)} <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">· {fmtPct(amount, pctOf)}</span>
+          {fmtINR(amount)} <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 ml-0.5">{pct.toFixed(1)}%</span>
         </span>
       </div>
       <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${width}%`, backgroundColor: color, opacity: custom ? 0.55 : 0.85 }} />
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(2, pct)}%`, backgroundColor: color }} />
       </div>
     </div>
   );

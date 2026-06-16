@@ -134,6 +134,17 @@ export const FIN_GROUP_COLORS = {
   commodity: '#f59e0b', // amber
 };
 
+// Colours for asset-class group rows in the composition cards (keyed by group id)
+export const GROUP_COLORS = {
+  equity: '#10b981',        // emerald
+  debt: '#0ea5e9',          // sky
+  commodity: '#f59e0b',     // amber
+  realEstate: '#f97316',    // orange
+  preciousMetals: '#eab308',// gold
+  loans: '#ef4444',         // rose
+};
+export const CUSTOM_COLOR = '#94a3b8'; // slate — used for custom buckets
+
 // Palette for per-item slices / bars within a holdings card
 export const ITEM_PALETTE = [
   '#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
@@ -243,6 +254,25 @@ export function filledGroupItems(alloc, sectionId, groupId) {
     .map(it => ({ label: it.label, amount: Number(a.values[sectionId][it.label]) || 0 }))
     .filter(x => x.amount > 0)
     .sort((x, y) => y.amount - x.amount);
+}
+
+// Group-level composition for a section (e.g. Equity / Debt / Commodity for
+// financial; Real Estate / Precious Metals for physical), plus a combined
+// "Custom Holdings" bucket. Zero rows dropped, sorted high → low. The amounts
+// always sum to the section total, so percentages add up to 100%.
+export function groupComposition(alloc, sectionId) {
+  const a = normalizeAllocation(alloc);
+  const section = getSection(sectionId);
+  if (!section) return [];
+  const rows = section.groups
+    .map(g => {
+      const amount = g.items.reduce((s, it) => s + (Number(a.values[sectionId][it.label]) || 0), 0);
+      return { id: g.id, label: g.title, amount, color: GROUP_COLORS[g.id] || CUSTOM_COLOR };
+    })
+    .filter(r => r.amount > 0);
+  const customTotal = (a.custom[sectionId] || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  if (customTotal > 0) rows.push({ id: '__custom', label: 'Custom Holdings', amount: customTotal, color: CUSTOM_COLOR });
+  return rows.sort((x, y) => y.amount - x.amount);
 }
 
 // Does this client have any allocation data worth showing?
