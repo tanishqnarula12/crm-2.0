@@ -250,10 +250,35 @@ export function filledGroupItems(alloc, sectionId, groupId) {
   const section = getSection(sectionId);
   const group = section?.groups.find(g => g.id === groupId);
   if (!group) return [];
+  const color = GROUP_COLORS[groupId] || CUSTOM_COLOR;
   return group.items
-    .map(it => ({ label: it.label, amount: Number(a.values[sectionId][it.label]) || 0 }))
+    .map(it => ({ label: it.label, amount: Number(a.values[sectionId][it.label]) || 0, color }))
     .filter(x => x.amount > 0)
     .sort((x, y) => y.amount - x.amount);
+}
+
+// Per-group columns for the allocation breakdown: each group with its filled
+// entries, group total and colour. A "Custom Holdings" pseudo-group is appended
+// when the section has custom rows so nothing the advisor entered is lost.
+export function sectionGroupColumns(alloc, sectionId) {
+  const a = normalizeAllocation(alloc);
+  const section = getSection(sectionId);
+  if (!section) return [];
+  const cols = section.groups.map(g => {
+    const items = filledGroupItems(a, sectionId, g.id);
+    return { id: g.id, title: g.title, color: GROUP_COLORS[g.id] || CUSTOM_COLOR, items, total: items.reduce((s, it) => s + it.amount, 0) };
+  });
+  const customRows = (a.custom[sectionId] || []).filter(x => x.amount > 0).sort((x, y) => y.amount - x.amount);
+  if (customRows.length > 0) {
+    cols.push({
+      id: '__custom',
+      title: 'Custom Holdings',
+      color: CUSTOM_COLOR,
+      items: customRows.map(x => ({ label: x.label, amount: x.amount, color: CUSTOM_COLOR, isCustom: true })),
+      total: customRows.reduce((s, x) => s + x.amount, 0),
+    });
+  }
+  return cols;
 }
 
 // Group-level composition for a section (e.g. Equity / Debt / Commodity for
