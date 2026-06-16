@@ -451,7 +451,6 @@ export default function App() {
             <ClientDetail
               client={selectedClient}
               totals={totals}
-              onBack={() => setSelectedClientId(null)}
               onAddGoal={() => { setEditingGoalId(null); setShowGoalForm(true); }}
               onSelectGoal={setSelectedGoalId}
               onDeleteGoal={(gid) => handleDeleteGoal(selectedClientId, gid)}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  ChevronLeft, Download, Plus, Target, Trash2, Pencil, FileText, RefreshCw, CheckCircle2, Save, TrendingUp, IndianRupee
+  Download, Plus, Target, Trash2, Pencil, FileText, RefreshCw, CheckCircle2, Save, TrendingUp, IndianRupee
 } from 'lucide-react';
 import { 
   Avatar, Card, btnPrimary, btnSecondary, btnGhost, inputCls 
@@ -54,7 +54,7 @@ const getGoalTheme = (name) => {
   };
 };
 
-export default function ClientDetail({ client, totals, onBack, onAddGoal, onSelectGoal, onDeleteGoal, onSaveAssumptions, onEditClient, isViewer }) {
+export default function ClientDetail({ client, totals, onAddGoal, onSelectGoal, onDeleteGoal, onSaveAssumptions, onEditClient, isViewer }) {
   const containerRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [includeProjection, setIncludeProjection] = useState(false);
@@ -73,10 +73,6 @@ export default function ClientDetail({ client, totals, onBack, onAddGoal, onSele
 
   return (
     <div ref={containerRef} className="space-y-6 animate-fade-in">
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group cursor-pointer">
-        <ChevronLeft size={16} className="transition-transform group-hover:translate-x-[-2px]" /> Back to clients directory
-      </button>
-
       <Card className="p-6 border border-slate-200/60 dark:border-slate-800/80">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
