@@ -109,6 +109,33 @@ export default function App() {
   const selectedGoal = selectedClient?.goals?.find(g => g.id === selectedGoalId);
   const assetClient = clients.find(c => c.id === assetClientId);
 
+  // Whenever either a goals-view client or an asset-allocation-view client is open,
+  // we're "inside" a single client's profile — swap the main tab bar for a per-client sub-nav.
+  const profileClientId = selectedClientId || assetClientId;
+  const profileClient = clients.find(c => c.id === profileClientId);
+  const inClientProfile = Boolean(profileClientId);
+
+  const goToGoalMapping = (clientId) => {
+    setAssetClientId(null);
+    setSelectedGoalId(null);
+    setSelectedClientId(clientId);
+    setTab('clients');
+  };
+
+  const goToAssetMapping = (clientId) => {
+    setSelectedClientId(null);
+    setSelectedGoalId(null);
+    setAssetClientId(clientId);
+    setTab('assets');
+  };
+
+  const backToClients = () => {
+    setSelectedClientId(null);
+    setSelectedGoalId(null);
+    setAssetClientId(null);
+    setTab('clients');
+  };
+
   // Group goals for overview tab
   const allGoalNames = useMemo(() => {
     const map = new Map();
@@ -324,7 +351,7 @@ export default function App() {
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Global Summary Statistics Dashboard */}
-        {!selectedClientId && !selectedGoalName && !assetClientId && (
+        {!inClientProfile && !selectedGoalName && (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6 animate-fade-in">
             <StatTile label="Total Clients" value={globalStats.totalClients} icon={Users} accent="blue" />
             <StatTile label="Clients with Goals" value={globalStats.clientsWithGoals} icon={CheckCircle2} accent="emerald" />
@@ -335,40 +362,80 @@ export default function App() {
           </div>
         )}
 
-        {/* Navigation Tabs */}
-        <div className="w-full overflow-x-auto mb-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
-            {[
-              { id: 'clients', label: 'Clients', icon: Users },
-              { id: 'goals', label: 'Goals Summary', icon: Target },
-              { id: 'assets', label: 'Asset Allocation', icon: Wallet },
-              { id: 'reports', label: 'Timeline Reports', icon: FileBarChart }
-            ].map(t => {
-              const Icon = t.icon;
-              const active = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => {
-                    setTab(t.id);
-                    setSelectedClientId(null);
-                    setSelectedGoalId(null);
-                    setSelectedGoalName(null);
-                    setAssetClientId(null);
-                  }}
-                  className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
-                    active
-                      ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <Icon size={14} />
-                  {t.label}
-                </button>
-              );
-            })}
+        {/* Navigation Tabs (top-level) OR per-client profile sub-nav */}
+        {!inClientProfile ? (
+          <div className="w-full overflow-x-auto mb-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
+              {[
+                { id: 'clients', label: 'Clients', icon: Users },
+                { id: 'goals', label: 'Goals Summary', icon: Target },
+                { id: 'assets', label: 'Asset Allocation', icon: Wallet },
+                { id: 'reports', label: 'Timeline Reports', icon: FileBarChart }
+              ].map(t => {
+                const Icon = t.icon;
+                const active = tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setTab(t.id);
+                      setSelectedClientId(null);
+                      setSelectedGoalId(null);
+                      setSelectedGoalName(null);
+                      setAssetClientId(null);
+                    }}
+                    className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                      active
+                        ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Icon size={14} />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="w-full overflow-x-auto mb-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden animate-fade-in">
+            <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
+              <button
+                onClick={backToClients}
+                className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
+              >
+                <ChevronLeft size={14} />
+                Back to Clients
+              </button>
+              <span className="hidden sm:inline text-slate-300 dark:text-slate-700 px-1">|</span>
+              <span className="hidden sm:inline px-2 text-xs font-bold text-slate-400 dark:text-slate-500 truncate max-w-[140px]">
+                {profileClient?.name}
+              </span>
+              <button
+                onClick={() => goToGoalMapping(profileClientId)}
+                className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                  selectedClientId
+                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Target size={14} />
+                Goal Mapping
+              </button>
+              <button
+                onClick={() => goToAssetMapping(profileClientId)}
+                className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                  assetClientId
+                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Wallet size={14} />
+                Asset Allocation Mapping
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Tab Routing */}
         {tab === 'clients' && !selectedClientId && (
