@@ -235,11 +235,11 @@ export function filledItems(alloc, sectionId) {
   section.groups.forEach(g => {
     g.items.forEach(it => {
       const amt = Number(a.values[sectionId][it.label]) || 0;
-      if (amt > 0) items.push({ label: it.label, amount: amt, group: g.title, isCustom: false });
+      if (amt > 0) items.push({ label: it.label, amount: amt, group: g.title, groupId: g.id, color: GROUP_COLORS[g.id] || CUSTOM_COLOR, isCustom: false });
     });
   });
   a.custom[sectionId].forEach(x => {
-    if (x.amount > 0) items.push({ label: x.label, amount: x.amount, group: 'Custom', isCustom: true });
+    if (x.amount > 0) items.push({ label: x.label, amount: x.amount, group: 'Custom', groupId: '__custom', color: CUSTOM_COLOR, isCustom: true });
   });
   return items.sort((x, y) => y.amount - x.amount);
 }

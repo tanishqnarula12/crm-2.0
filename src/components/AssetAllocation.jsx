@@ -119,6 +119,8 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
 
   const finRows = useMemo(() => groupComposition(alloc, 'financial'), [alloc]);
   const phyRows = useMemo(() => groupComposition(alloc, 'physical'), [alloc]);
+  const finItems = useMemo(() => filledItems(alloc, 'financial'), [alloc]);
+  const phyItems = useMemo(() => filledItems(alloc, 'physical'), [alloc]);
   const liaItems = useMemo(() => filledItems(alloc, 'liabilities'), [alloc]);
 
   return (
@@ -196,15 +198,34 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
             </div>
           </section>
 
-          {/* Liabilities Composition — each loan / payable */}
+          {/* Assets & Liabilities Allocation — every individual entry from the form,
+              as a share of its own category (category = 100%) */}
           <section className="space-y-4">
-            <SectionHeading icon={CreditCard} title="Liabilities Composition" hint="Outstanding loans & payables" />
-            <CompositionCard
-              title="Loans & Liabilities"
+            <SectionHeading icon={Wallet} title="Assets & Liabilities Allocation" hint="Each holding as a share of its category (category = 100%)" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <AllocationDetailCard
+                title="Financial Asset Allocation"
+                icon={TrendingUp}
+                accent="indigo"
+                total={t.financial}
+                items={finItems}
+                emptyText="No financial holdings recorded."
+              />
+              <AllocationDetailCard
+                title="Physical Asset Allocation"
+                icon={Home}
+                accent="amber"
+                total={t.physical}
+                items={phyItems}
+                emptyText="No physical holdings recorded."
+              />
+            </div>
+            <AllocationDetailCard
+              title="Liabilities Allocation"
               icon={CreditCard}
               accent="rose"
               total={t.liabilities}
-              rows={liaItems.map(it => ({ id: it.label, label: it.label, amount: it.amount, color: SECTION_COLORS.liabilities, custom: it.isCustom }))}
+              items={liaItems}
               emptyText="No liabilities recorded — this client is debt-free. 🎉"
             />
           </section>
@@ -270,11 +291,11 @@ function NetWorthComposition({ t }) {
         {gross === 0 ? (
           <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-6">No values recorded yet.</p>
         ) : (
-          <div className="flex flex-col sm:flex-row items-center gap-8">
-            <div className="relative w-56 h-56 shrink-0">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-8 lg:gap-14">
+            <div className="relative w-52 h-52 shrink-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={64} outerRadius={92} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
+                  <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={86} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
                     {data.map((d, i) => <Cell key={i} fill={d.color} />)}
                   </Pie>
                   <Tooltip formatter={(v, n) => [fmtINR(v), n]} contentStyle={tooltipStyle} />
@@ -285,7 +306,7 @@ function NetWorthComposition({ t }) {
                 <span className={`text-xl font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{fmtINR(t.netWorth)}</span>
               </div>
             </div>
-            <div className="flex-1 w-full space-y-3">
+            <div className="w-full sm:max-w-sm space-y-3">
               {data.map((d, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
@@ -359,6 +380,32 @@ function CompositionRow({ label, amount, color, total, custom }) {
         <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(2, pct)}%`, backgroundColor: color }} />
       </div>
     </div>
+  );
+}
+
+// --- Allocation detail card (every individual entry, category = 100%) ----
+function AllocationDetailCard({ title, icon: Icon, accent, total, items, emptyText }) {
+  const ac = CARD_ACCENTS[accent] || CARD_ACCENTS.indigo;
+  return (
+    <Card className={`p-6 border shadow-md flex flex-col ${ac.ring}`}>
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${ac.icon}`}><Icon size={16} /></div>
+          <div className="min-w-0">
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{title}</h4>
+            <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 tabular-nums">{fmtINR(total)}</p>
+          </div>
+        </div>
+        <span className={`text-xs font-black px-2.5 py-1 rounded-full shrink-0 tabular-nums ${ac.icon}`}>100%</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-6">{emptyText}</p>
+      ) : (
+        <div className="space-y-3.5">
+          {items.map(it => <CompositionRow key={it.label} label={it.label} amount={it.amount} color={it.color} total={total} custom={it.isCustom} />)}
+        </div>
+      )}
+    </Card>
   );
 }
 
