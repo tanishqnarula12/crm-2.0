@@ -457,7 +457,7 @@ export default function App() {
                 : prevHistory;
               handleUpdateGoal(selectedClient.id, editingGoalId, { ...g, history });
             } else {
-              handleAddGoal(selectedClient.id, { ...g, createdAt: new Date().toISOString(), history: [] });
+              handleAddGoal(selectedClient.id, { ...g, createdAt: g.createdAt || new Date().toISOString(), history: [] });
             }
             setShowGoalForm(false);
             setEditingGoalId(null);

@@ -97,6 +97,9 @@ export function buildGoalEdits(prev, next) {
   const push = (label, from, to) => edits.push({ label, from, to });
 
   if ((prev.name || '') !== (next.name || '')) push('Goal name', dash(prev.name), dash(next.name));
+  if (numChanged(prev.createdMonth, next.createdMonth) || numChanged(prev.createdYear, next.createdYear)) {
+    push('Goal created date', monthLabel(prev.createdMonth || 1, prev.createdYear), monthLabel(next.createdMonth || 1, next.createdYear));
+  }
   if ((prev.kidName || '') !== (next.kidName || '')) push("Kid's name", dash(prev.kidName), dash(next.kidName));
   if (numChanged(prev.amount, next.amount)) push('Goal cost (today)', fmtFull(prev.amount), fmtFull(next.amount));
   if (numChanged(prev.targetMonth, next.targetMonth) || numChanged(prev.targetYear, next.targetYear)) {

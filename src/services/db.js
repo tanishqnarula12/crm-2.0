@@ -62,7 +62,8 @@ function mapFrontendGoal(g, clientId) {
     current_sip: g.currentSip,
     kid_name: g.kidName || null,
     history: Array.isArray(g.history) ? g.history : [],
-    actuals: Array.isArray(g.actuals) ? g.actuals : []
+    actuals: Array.isArray(g.actuals) ? g.actuals : [],
+    ...(g.createdAt ? { created_at: g.createdAt } : {})
   };
 }
 
@@ -176,6 +177,9 @@ export async function updateGoal(clientId, goalId, updates) {
     if (updates.amount !== undefined) dbUpdates.amount = updates.amount;
     if (updates.targetMonth !== undefined) dbUpdates.target_month = updates.targetMonth;
     if (updates.targetYear !== undefined) dbUpdates.target_year = updates.targetYear;
+    if (updates.createdMonth !== undefined) dbUpdates.created_month = updates.createdMonth;
+    if (updates.createdYear !== undefined) dbUpdates.created_year = updates.createdYear;
+    if (updates.createdAt !== undefined) dbUpdates.created_at = updates.createdAt;
     if (updates.inflation !== undefined) dbUpdates.inflation = updates.inflation;
     if (updates.expectedReturn !== undefined) dbUpdates.expected_return = updates.expectedReturn;
     if (updates.sipIncRate !== undefined) dbUpdates.sip_inc_rate = updates.sipIncRate;

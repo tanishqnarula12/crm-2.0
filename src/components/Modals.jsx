@@ -3,7 +3,7 @@ import { X, CheckCircle2, Upload, AlertCircle, FileSpreadsheet } from 'lucide-re
 import * as XLSX from 'xlsx';
 import { Field, inputCls, selectCls, btnPrimary, btnGhost } from './UI';
 import {
-  calcGoal, monthsBetween, monthLabel, fmtFull, fmtINR, fmtSip, nv, parseNum, GOAL_PRESETS, CURRENT_MONTH, CURRENT_YEAR, MONTH_NAMES, needsKidName
+  calcGoal, monthsBetween, fmtFull, fmtINR, fmtSip, nv, parseNum, GOAL_PRESETS, CURRENT_MONTH, CURRENT_YEAR, MONTH_NAMES, needsKidName
 } from '../utils/calc';
 
 function Modal({ title, onClose, children, footer, maxWidth = 'max-w-md' }) {
@@ -100,7 +100,28 @@ export function GoalFormModal({ initial, onClose, onSave }) {
     createdYear: CURRENT_YEAR,
   });
   
+  // Editable goal creation/anchor date — lets backdated goals (created before this app existed) compound correctly
+  const [createdDate, setCreatedDate] = useState(() => {
+    if (initial?.createdAt) {
+      const d = new Date(initial.createdAt);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+    if (initial) {
+      const m = String(initial.createdMonth || CURRENT_MONTH).padStart(2, '0');
+      return `${initial.createdYear || CURRENT_YEAR}-${m}-01`;
+    }
+    return new Date().toISOString().slice(0, 10);
+  });
+
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const handleCreatedDateChange = (e) => {
+    const v = e.target.value;
+    setCreatedDate(v);
+    const d = new Date(v + 'T00:00:00');
+    if (!isNaN(d.getTime())) {
+      setForm(f => ({ ...f, createdMonth: d.getMonth() + 1, createdYear: d.getFullYear() }));
+    }
+  };
   const effectiveName = nameChoice === 'Others' ? customName.trim() : nameChoice;
   const showKidName = needsKidName(effectiveName);
   const previewCalc = calcGoal({ ...form, name: effectiveName });
@@ -108,6 +129,8 @@ export function GoalFormModal({ initial, onClose, onSave }) {
 
   const handleSave = () => {
     if (!effectiveName || targetBeforeStart || !form.amount) return;
+    const createdAtDate = new Date(createdDate + 'T00:00:00');
+    const createdAt = isNaN(createdAtDate.getTime()) ? (initial?.createdAt || new Date().toISOString()) : createdAtDate.toISOString();
     const normalized = {
       ...form,
       name: effectiveName,
@@ -118,11 +141,9 @@ export function GoalFormModal({ initial, onClose, onSave }) {
       sipIncRate: Number(form.sipIncRate) || 0,
       currentInv: Number(form.currentInv) || 0,
       currentSip: Number(form.currentSip) || 0,
+      createdAt,
     };
-    const payload = isEdit
-      ? { ...normalized, createdMonth: initial.createdMonth || CURRENT_MONTH, createdYear: initial.createdYear || CURRENT_YEAR }
-      : { ...normalized, createdMonth: CURRENT_MONTH, createdYear: CURRENT_YEAR };
-    onSave(payload);
+    onSave(normalized);
   };
 
   return (
@@ -132,11 +153,6 @@ export function GoalFormModal({ initial, onClose, onSave }) {
       maxWidth="max-w-3xl"
       footer={
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-          {isEdit && (
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Goal Anchor Date: {monthLabel(initial.createdMonth || CURRENT_MONTH, initial.createdYear || CURRENT_YEAR)}
-            </p>
-          )}
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={onClose} className={btnGhost}>Cancel</button>
             <button onClick={handleSave} disabled={!effectiveName || targetBeforeStart || !form.amount} className={btnPrimary}>
@@ -177,6 +193,11 @@ export function GoalFormModal({ initial, onClose, onSave }) {
         <Field label="Target cost today (₹)">
           <input type="number" value={nv(form.amount)} onChange={(e) => upd('amount', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 50,00,000" />
         </Field>
+
+        <Field label="Goal Created Date" hint="Backdate this if the goal already existed before using this app">
+          <input type="date" value={createdDate} onChange={handleCreatedDateChange} max={new Date().toISOString().slice(0, 10)} className={inputCls} />
+        </Field>
+        <div className="hidden md:block" />
 
         <Field label="Target Month">
           <div className="relative">
