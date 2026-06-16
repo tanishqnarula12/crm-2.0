@@ -55,6 +55,10 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, onSaveAct
   const actualColor = aheadOverall ? '#10b981' : '#ef4444';
   const actualFill = aheadOverall ? 'url(#colorActualUp)' : 'url(#colorActualDown)';
 
+  const hasActuals = actualByYear.size > 0;
+  const startYear = projection.length ? projection[0].year : null;
+  const startCorpus = Number(goal.currentInv) || 0;
+
   // Format data for Recharts
   const chartData = projection.map(r => {
     const row = {
@@ -67,10 +71,14 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, onSaveAct
       const proj = projAt(a.date);
       row['Actual'] = Math.round(Number(a.amount) || 0);
       row['ActualProj'] = proj != null ? Math.round(proj) : null;
+      row['ActualIsEntry'] = true;
+    } else if (hasActuals && r.year === startYear) {
+      // Synthetic origin so the dotted actual line starts from the current corpus, just like the projected line
+      row['Actual'] = Math.round(startCorpus);
+      row['ActualProj'] = Math.round(r.openingBal);
     }
     return row;
   });
-  const hasActuals = actualByYear.size > 0;
 
   // Custom Tooltip Formatter
   const formatTooltipValue = (value) => {
@@ -299,7 +307,7 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, onSaveAct
 // Per-point dot on the chart's actual line: green when at/above the projected corpus, red when below
 function ActualDot(props) {
   const { cx, cy, payload } = props;
-  if (cx == null || cy == null || payload == null || payload.Actual == null) return null;
+  if (cx == null || cy == null || !payload || !payload.ActualIsEntry) return null;
   const proj = payload.ActualProj;
   const ahead = proj == null || payload.Actual >= proj;
   const color = ahead ? '#10b981' : '#ef4444';
@@ -329,20 +337,30 @@ function CreateLog({ actuals, projAt, onSave, isViewer }) {
   };
   const cancel = () => { setEditingId(null); setDate(''); setAmount(''); setError(''); };
 
+  const fmtEntry = (d, a) => `${fmtDate(d) || d}: ${fmtINR(Number(a) || 0)}`;
+
   const save = () => {
     const amt = Number(amount);
     if (!date) { setError('Pick a date for this entry.'); return; }
     if (!isFinite(amt) || amt < 0) { setError('Enter a valid amount.'); return; }
-    const next = editingId === 'new'
-      ? [...(actuals || []), { id: uid(), date, amount: amt }]
-      : (actuals || []).map(x => x.id === editingId ? { ...x, date, amount: amt } : x);
-    onSave(next);
+    let next, changes;
+    if (editingId === 'new') {
+      next = [...(actuals || []), { id: uid(), date, amount: amt }];
+      changes = [{ label: 'Create Log entry added', from: '—', to: fmtEntry(date, amt) }];
+    } else {
+      const prev = (actuals || []).find(x => x.id === editingId);
+      next = (actuals || []).map(x => x.id === editingId ? { ...x, date, amount: amt } : x);
+      changes = [{ label: 'Create Log entry edited', from: prev ? fmtEntry(prev.date, prev.amount) : '—', to: fmtEntry(date, amt) }];
+    }
+    onSave(next, changes);
     cancel();
   };
 
   const remove = (id) => {
     if (!window.confirm('Delete this log entry?')) return;
-    onSave((actuals || []).filter(x => x.id !== id));
+    const prev = (actuals || []).find(x => x.id === id);
+    const changes = prev ? [{ label: 'Create Log entry removed', from: fmtEntry(prev.date, prev.amount), to: '—' }] : [];
+    onSave((actuals || []).filter(x => x.id !== id), changes);
     if (editingId === id) cancel();
   };
 

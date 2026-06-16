@@ -370,7 +370,13 @@ export default function App() {
               clientName={selectedClient.name}
               onBack={() => setSelectedGoalId(null)}
               onEdit={() => { setEditingGoalId(selectedGoalId); setShowGoalForm(true); }}
-              onSaveActuals={(actuals) => handleUpdateGoal(selectedClientId, selectedGoalId, { actuals })}
+              onSaveActuals={(actuals, changes) => {
+                const prevHistory = Array.isArray(selectedGoal?.history) ? selectedGoal.history : [];
+                const history = (changes && changes.length)
+                  ? [...prevHistory, { at: new Date().toISOString(), changes }]
+                  : prevHistory;
+                handleUpdateGoal(selectedClientId, selectedGoalId, { actuals, history });
+              }}
               isViewer={isViewer}
             />
           </div>
