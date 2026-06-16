@@ -81,6 +81,7 @@ export async function getClients() {
       pan: client.pan,
       age: client.age,
       assumptions: client.assumptions || '',
+      assetAllocation: client.asset_allocation || null,
       goals: (client.goals || []).map(mapDbGoal)
     }));
   } else {
@@ -126,9 +127,17 @@ export async function addClient(client) {
 
 export async function updateClient(clientId, updates) {
   if (isSupabaseConfigured) {
+    // Translate frontend (camelCase) keys to DB column names
+    const dbUpdates = {};
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.pan !== undefined) dbUpdates.pan = updates.pan;
+    if (updates.age !== undefined) dbUpdates.age = updates.age;
+    if (updates.assumptions !== undefined) dbUpdates.assumptions = updates.assumptions;
+    if (updates.assetAllocation !== undefined) dbUpdates.asset_allocation = updates.assetAllocation;
+
     const { error } = await supabase
       .from('clients')
-      .update(updates)
+      .update(dbUpdates)
       .eq('id', clientId);
     if (error) throw error;
   } else {
