@@ -1,26 +1,76 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  ChevronLeft, Pencil, Percent, TrendingUp, Calendar, IndianRupee, Info, CheckCircle2, History, ArrowRight, User
+  ChevronLeft, Pencil, Percent, TrendingUp, Calendar, IndianRupee, Info, CheckCircle2, History, ArrowRight, User,
+  Plus, Trash2, Check, X, TrendingDown, ClipboardList
 } from 'lucide-react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
-} from 'recharts';
-import { Card, btnSecondary } from './UI';
 import {
-  calcGoal, buildProjection, monthLabel, fmtINR, fmtSip, goalIcon, goalEmoji, achievementColor, MONTH_NAMES, goalCreatedLabel, needsKidName, fmtDate
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
+import { Card, btnSecondary, btnPrimary, btnGhost, inputCls } from './UI';
+import {
+  calcGoal, buildProjection, monthLabel, fmtINR, fmtSip, goalIcon, goalEmoji, achievementColor, MONTH_NAMES, goalCreatedLabel, needsKidName, fmtDate, uid
 } from '../utils/calc';
 
-export default function GoalDetail({ goal, clientName, onBack, onEdit, isViewer }) {
+export default function GoalDetail({ goal, clientName, onBack, onEdit, onSaveActuals, isViewer }) {
   const c = calcGoal(goal);
   const projection = buildProjection(goal);
   const remainingLabel = c.years >= 1 ? `${c.years.toFixed(1)} years to go` : c.months > 0 ? `${c.months} months to go` : 'Due now';
 
+  // Logged actual portfolio values ("Create Log")
+  const actuals = Array.isArray(goal.actuals) ? goal.actuals : [];
+
+  // Quick lookup of each projection year's opening/closing balance, to compare actuals against
+  const projByYear = new Map();
+  projection.forEach(r => projByYear.set(r.year, r));
+
+  // Projected corpus interpolated to the exact date of a logged entry (opening → closing across the year)
+  const projAt = (dateStr) => {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    const r = projByYear.get(d.getFullYear());
+    if (!r) return null;
+    const frac = Math.min(1, Math.max(0, (d.getMonth() + 1) / 12));
+    return r.openingBal + (r.closingBal - r.openingBal) * frac;
+  };
+
+  // Keep only the latest logged value per year for plotting (one point per x-axis tick)
+  const actualByYear = new Map();
+  actuals.forEach(a => {
+    const d = new Date(a.date);
+    if (isNaN(d.getTime())) return;
+    const y = d.getFullYear();
+    const prev = actualByYear.get(y);
+    if (!prev || new Date(a.date) > new Date(prev.date)) actualByYear.set(y, a);
+  });
+
+  // Overall standing = where the most recent logged value sits vs its projection (drives line + shadow colour)
+  const latestActual = actuals.length
+    ? [...actuals].sort((a, b) => new Date(b.date) - new Date(a.date))[0]
+    : null;
+  let aheadOverall = true;
+  if (latestActual) {
+    const proj = projAt(latestActual.date);
+    if (proj != null) aheadOverall = (Number(latestActual.amount) || 0) >= proj;
+  }
+  const actualColor = aheadOverall ? '#10b981' : '#ef4444';
+  const actualFill = aheadOverall ? 'url(#colorActualUp)' : 'url(#colorActualDown)';
+
   // Format data for Recharts
-  const chartData = projection.map(r => ({
-    name: String(r.year),
-    'Closing Balance': Math.round(r.closingBal),
-    'Total Invested': Math.round(r.totalInvested)
-  }));
+  const chartData = projection.map(r => {
+    const row = {
+      name: String(r.year),
+      'Closing Balance': Math.round(r.closingBal),
+      'Total Invested': Math.round(r.totalInvested)
+    };
+    const a = actualByYear.get(r.year);
+    if (a) {
+      const proj = projAt(a.date);
+      row['Actual'] = Math.round(Number(a.amount) || 0);
+      row['ActualProj'] = proj != null ? Math.round(proj) : null;
+    }
+    return row;
+  });
+  const hasActuals = actualByYear.size > 0;
 
   // Custom Tooltip Formatter
   const formatTooltipValue = (value) => {
@@ -115,6 +165,14 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, isViewer 
                       <stop offset="5%" stopColor="var(--chart-invested)" stopOpacity={0.15}/>
                       <stop offset="95%" stopColor="var(--chart-invested)" stopOpacity={0}/>
                     </linearGradient>
+                    <linearGradient id="colorActualUp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.35}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorActualDown" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.35}/>
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
                   <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
@@ -144,6 +202,21 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, isViewer 
                   />
                   <Area type="monotone" dataKey="Closing Balance" stroke="var(--chart-balance)" strokeWidth={2.5} fillOpacity={1} fill="url(#colorClosing)" />
                   <Area type="monotone" dataKey="Total Invested" stroke="var(--chart-invested)" strokeWidth={1.5} fillOpacity={1} fill="url(#colorInvested)" />
+                  {hasActuals && (
+                    <Area
+                      type="monotone"
+                      dataKey="Actual"
+                      stroke={actualColor}
+                      strokeWidth={2.5}
+                      strokeDasharray="6 5"
+                      fillOpacity={1}
+                      fill={actualFill}
+                      connectNulls
+                      isAnimationActive={false}
+                      dot={<ActualDot />}
+                      activeDot={{ r: 5, strokeWidth: 0 }}
+                    />
+                  )}
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -156,6 +229,14 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, isViewer 
                 <div className="w-3.5 h-3.5 rounded bg-slate-400 dark:bg-slate-600" />
                 <span className="text-slate-600 dark:text-slate-400">Total Invested Principal</span>
               </div>
+              {hasActuals && (
+                <div className="flex items-center gap-2">
+                  <div className="w-5 border-t-2 border-dashed" style={{ borderColor: actualColor }} />
+                  <span className="text-slate-600 dark:text-slate-400">
+                    Actual Logged Value (<span className="text-emerald-600 dark:text-emerald-400">ahead</span> / <span className="text-rose-600 dark:text-rose-400">behind</span> plan)
+                  </span>
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -208,7 +289,165 @@ export default function GoalDetail({ goal, clientName, onBack, onEdit, isViewer 
         </Card>
       </div>
 
+      <CreateLog actuals={actuals} projAt={projAt} onSave={onSaveActuals} isViewer={isViewer} />
+
       <ChangeLog history={goal.history} />
+    </div>
+  );
+}
+
+// Per-point dot on the chart's actual line: green when at/above the projected corpus, red when below
+function ActualDot(props) {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null || payload == null || payload.Actual == null) return null;
+  const proj = payload.ActualProj;
+  const ahead = proj == null || payload.Actual >= proj;
+  const color = ahead ? '#10b981' : '#ef4444';
+  return <circle cx={cx} cy={cy} r={4.5} fill={color} stroke="#fff" strokeWidth={1.75} />;
+}
+
+// "Create Log" — record actual portfolio values (amount + date) that overlay onto the growth chart.
+function CreateLog({ actuals, projAt, onSave, isViewer }) {
+  const [editingId, setEditingId] = useState(null); // entry id, or 'new', or null
+  const [date, setDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [error, setError] = useState('');
+
+  const list = [...(actuals || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const startAdd = () => {
+    setEditingId('new');
+    setDate(new Date().toISOString().slice(0, 10));
+    setAmount('');
+    setError('');
+  };
+  const startEdit = (e) => {
+    setEditingId(e.id);
+    setDate((e.date || '').slice(0, 10));
+    setAmount(String(e.amount ?? ''));
+    setError('');
+  };
+  const cancel = () => { setEditingId(null); setDate(''); setAmount(''); setError(''); };
+
+  const save = () => {
+    const amt = Number(amount);
+    if (!date) { setError('Pick a date for this entry.'); return; }
+    if (!isFinite(amt) || amt < 0) { setError('Enter a valid amount.'); return; }
+    const next = editingId === 'new'
+      ? [...(actuals || []), { id: uid(), date, amount: amt }]
+      : (actuals || []).map(x => x.id === editingId ? { ...x, date, amount: amt } : x);
+    onSave(next);
+    cancel();
+  };
+
+  const remove = (id) => {
+    if (!window.confirm('Delete this log entry?')) return;
+    onSave((actuals || []).filter(x => x.id !== id));
+    if (editingId === id) cancel();
+  };
+
+  const EntryForm = (
+    <div className="flex flex-col sm:flex-row sm:items-end gap-3 p-4 rounded-xl bg-slate-50/80 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800">
+      <div className="flex-1 space-y-1.5">
+        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+      </div>
+      <div className="flex-1 space-y-1.5">
+        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actual Amount (₹)</label>
+        <input type="number" min="0" step="any" value={amount} placeholder="e.g. 1250000" onChange={(e) => setAmount(e.target.value)} className={inputCls} />
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <button onClick={save} className={btnPrimary}><Check size={14} /> Save</button>
+        <button onClick={cancel} className={btnSecondary}><X size={14} /> Cancel</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-base font-bold text-slate-800 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
+          <ClipboardList size={16} /> Create Log
+        </h3>
+        {!isViewer && editingId === null && (
+          <button onClick={startAdd} className={btnSecondary}><Plus size={14} /> Add Entry</button>
+        )}
+      </div>
+      <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md space-y-4">
+        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+          Log the actual value of this goal's portfolio on any date. Each entry is plotted on the Growth Projection Chart as a dotted line —
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold"> green</span> when it beats the projected corpus,
+          <span className="text-rose-600 dark:text-rose-400 font-semibold"> red</span> when it falls short.
+        </p>
+
+        {!isViewer && editingId === 'new' && EntryForm}
+        {error && <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">{error}</p>}
+
+        {list.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-4">
+            No entries yet. {isViewer ? '' : 'Add an entry to track actual progress against the plan.'}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="text-left px-3 py-3 font-bold">Date</th>
+                  <th className="text-right px-3 py-3 font-bold">Actual Amount</th>
+                  <th className="text-right px-3 py-3 font-bold">Projected</th>
+                  <th className="text-center px-3 py-3 font-bold">Status</th>
+                  {!isViewer && <th className="text-right px-3 py-3 font-bold">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/50 dark:divide-slate-800/50">
+                {list.map((e) => {
+                  if (editingId === e.id) {
+                    return (
+                      <tr key={e.id}>
+                        <td colSpan={isViewer ? 4 : 5} className="py-3">{EntryForm}</td>
+                      </tr>
+                    );
+                  }
+                  const proj = projAt(e.date);
+                  const amt = Number(e.amount) || 0;
+                  const ahead = proj == null || amt >= proj;
+                  return (
+                    <tr key={e.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                      <td className="px-3 py-3.5 font-semibold text-slate-900 dark:text-slate-100">{fmtDate(e.date) || e.date}</td>
+                      <td className="px-3 py-3.5 text-right font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(amt)}</td>
+                      <td className="px-3 py-3.5 text-right text-slate-500 dark:text-slate-400 tabular-nums">{proj == null ? '—' : fmtINR(proj)}</td>
+                      <td className="px-3 py-3.5 text-center">
+                        {proj == null ? (
+                          <span className="text-slate-400 dark:text-slate-600">—</span>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded-full ${ahead
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-200/50 dark:ring-emerald-900/40'
+                            : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 ring-1 ring-rose-200/50 dark:ring-rose-900/40'}`}>
+                            {ahead ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                            {ahead ? 'Ahead' : 'Behind'}
+                          </span>
+                        )}
+                      </td>
+                      {!isViewer && (
+                        <td className="px-3 py-3.5">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => startEdit(e)} title="Edit" className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors cursor-pointer">
+                              <Pencil size={14} />
+                            </button>
+                            <button onClick={() => remove(e.id)} title="Delete" className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

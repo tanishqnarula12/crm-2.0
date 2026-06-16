@@ -370,6 +370,7 @@ export default function App() {
               clientName={selectedClient.name}
               onBack={() => setSelectedGoalId(null)}
               onEdit={() => { setEditingGoalId(selectedGoalId); setShowGoalForm(true); }}
+              onSaveActuals={(actuals) => handleUpdateGoal(selectedClientId, selectedGoalId, { actuals })}
               isViewer={isViewer}
             />
           </div>

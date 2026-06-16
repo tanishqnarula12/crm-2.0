@@ -39,6 +39,7 @@ function mapDbGoal(g) {
     currentSip: Number(g.current_sip),
     kidName: g.kid_name || '',
     history: Array.isArray(g.history) ? g.history : [],
+    actuals: Array.isArray(g.actuals) ? g.actuals : [],
     createdAt: g.created_at || null
   };
 }
@@ -60,7 +61,8 @@ function mapFrontendGoal(g, clientId) {
     current_inv: g.currentInv,
     current_sip: g.currentSip,
     kid_name: g.kidName || null,
-    history: Array.isArray(g.history) ? g.history : []
+    history: Array.isArray(g.history) ? g.history : [],
+    actuals: Array.isArray(g.actuals) ? g.actuals : []
   };
 }
 
@@ -181,6 +183,7 @@ export async function updateGoal(clientId, goalId, updates) {
     if (updates.currentSip !== undefined) dbUpdates.current_sip = updates.currentSip;
     if (updates.kidName !== undefined) dbUpdates.kid_name = updates.kidName || null;
     if (updates.history !== undefined) dbUpdates.history = Array.isArray(updates.history) ? updates.history : [];
+    if (updates.actuals !== undefined) dbUpdates.actuals = Array.isArray(updates.actuals) ? updates.actuals : [];
 
     const { error } = await supabase
       .from('goals')
