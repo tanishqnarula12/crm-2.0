@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Users, Target, FileBarChart, Plus, ChevronLeft, Trash2, X,
+  Users, Target, Plus, ChevronLeft, Trash2, X,
   Calendar, Percent, Search, SlidersHorizontal, Pencil, Info, Shield, Plane, Car,
   Home, Heart, GraduationCap, Gift, CheckCircle2,
   AlertCircle, Download, RefreshCw, Save, FileText, Sun, Moon, LogOut, Wallet, PieChart
@@ -26,7 +26,9 @@ import AssetAllocationModal from './components/AssetAllocationModal';
 import { normalizeAllocation, buildAllocationEdits, hasAllocation } from './utils/assets';
 import { StatTile } from './components/UI';
 import Login from './components/Login';
-import { isAuthenticated, setAuthenticated, clearAuthentication, isViewerRole } from './utils/auth';
+import Sidebar from './components/Sidebar';
+import Dashboard from './components/Dashboard';
+import { isAuthenticated, setAuthenticated, clearAuthentication, isViewerRole, getRole } from './utils/auth';
 
 // Assets
 import logoImg from './assets/logo.png';
@@ -36,7 +38,7 @@ export default function App() {
   const [isViewer, setIsViewer] = useState(() => isViewerRole());
   const [clients, setClients] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState('clients');
+  const [tab, setTab] = useState('dashboard');
 
   const handleLogin = (role) => {
     setAuthenticated(role);
@@ -126,6 +128,15 @@ export default function App() {
     setSelectedGoalId(null);
     setAssetClientId(clientId);
     setTab('assets');
+  };
+
+  // Sidebar navigation — switch top-level section and clear any open profile/drill-down state.
+  const goToTab = (tabId) => {
+    setTab(tabId);
+    setSelectedClientId(null);
+    setSelectedGoalId(null);
+    setSelectedGoalName(null);
+    setAssetClientId(null);
   };
 
   const backToClients = () => {
@@ -317,124 +328,99 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/40 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 antialiased font-sans">
-      {/* App Header */}
-      <header className="bg-white/80 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-800/80 backdrop-blur-md sticky top-0 z-30 transition-colors">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src={logoImg} className="h-9 w-9 object-contain rounded-xl" alt="Team Fintness Logo" />
-            <div className="leading-tight">
-              <h1 className="text-base font-bold text-slate-900 dark:text-white">Team Fintness</h1>
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Goal Management System</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="hidden md:inline text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3.5 py-1.5 rounded-full">FY {CURRENT_YEAR}</span>
-            <button
-              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
-              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
-              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-            <button
-              onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-900/40 transition-all shadow-sm cursor-pointer"
-              title="Sign out"
-            >
-              <LogOut size={15} />
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen flex bg-slate-50/40 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 antialiased font-sans">
+      <Sidebar tab={tab} onNavigate={goToTab} onAddClient={() => setShowAddClient(true)} isViewer={isViewer} />
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Global Summary Statistics Dashboard */}
-        {!inClientProfile && !selectedGoalName && (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6 animate-fade-in">
-            <StatTile label="Total Clients" value={globalStats.totalClients} icon={Users} accent="blue" />
-            <StatTile label="Clients with Goals" value={globalStats.clientsWithGoals} icon={CheckCircle2} accent="emerald" />
-            <StatTile label="Clients without Goals" value={globalStats.clientsWithoutGoals} icon={AlertCircle} accent="amber" />
-            <StatTile label="Total Goals" value={globalStats.activeGoals} icon={Target} accent="indigo" />
-            <StatTile label="Clients with Asset Allocation" value={globalStats.clientsWithAllocation} icon={Wallet} accent="emerald" />
-            <StatTile label="Clients without Asset Allocation" value={globalStats.clientsWithoutAllocation} icon={PieChart} accent="amber" />
-          </div>
-        )}
-
-        {/* Navigation Tabs (top-level) OR per-client profile sub-nav */}
-        {!inClientProfile ? (
-          <div className="w-full overflow-x-auto mb-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
-              {[
-                { id: 'clients', label: 'Clients', icon: Users },
-                { id: 'goals', label: 'Goals Summary', icon: Target },
-                { id: 'assets', label: 'Asset Allocation', icon: Wallet },
-                { id: 'reports', label: 'Timeline Reports', icon: FileBarChart }
-              ].map(t => {
-                const Icon = t.icon;
-                const active = tab === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => {
-                      setTab(t.id);
-                      setSelectedClientId(null);
-                      setSelectedGoalId(null);
-                      setSelectedGoalName(null);
-                      setAssetClientId(null);
-                    }}
-                    className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
-                      active
-                        ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    <Icon size={14} />
-                    {t.label}
-                  </button>
-                );
-              })}
+      <div className="flex-1 min-w-0">
+        {/* App Header */}
+        <header className="bg-white/80 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-800/80 backdrop-blur-md sticky top-0 z-30 transition-colors">
+          <div className="px-6 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <img src={logoImg} className="h-9 w-9 object-contain rounded-xl" alt="Team Fintness Logo" />
+              <div className="leading-tight">
+                <h1 className="text-base font-bold text-slate-900 dark:text-white">Team Fintness</h1>
+                <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Goal Management System</p>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="w-full overflow-x-auto mb-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden animate-fade-in">
-            <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
+            <div className="flex items-center gap-3">
+              <span className="hidden md:inline text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3.5 py-1.5 rounded-full">FY {CURRENT_YEAR}</span>
               <button
-                onClick={backToClients}
-                className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
+                onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+                className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               >
-                <ChevronLeft size={14} />
-                Back to Clients
+                {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
               </button>
               <button
-                onClick={() => goToGoalMapping(profileClientId)}
-                className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
-                  selectedClientId
-                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                }`}
+                onClick={handleLogout}
+                className="inline-flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-900/40 transition-all shadow-sm cursor-pointer"
+                title="Sign out"
               >
-                <Target size={14} />
-                Goal Mapping
-              </button>
-              <button
-                onClick={() => goToAssetMapping(profileClientId)}
-                className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
-                  assetClientId
-                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Wallet size={14} />
-                Asset Allocation Mapping
+                <LogOut size={15} />
               </button>
             </div>
           </div>
-        )}
+        </header>
 
-        {/* Tab Routing */}
-        {tab === 'clients' && !selectedClientId && (
+        {/* Main Container */}
+        <main className="max-w-7xl mx-auto px-6 py-8">
+          {/* Global Summary Statistics Dashboard */}
+          {tab !== 'dashboard' && !inClientProfile && !selectedGoalName && (
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6 animate-fade-in">
+              <StatTile label="Total Clients" value={globalStats.totalClients} icon={Users} accent="blue" />
+              <StatTile label="Clients with Goals" value={globalStats.clientsWithGoals} icon={CheckCircle2} accent="emerald" />
+              <StatTile label="Clients without Goals" value={globalStats.clientsWithoutGoals} icon={AlertCircle} accent="amber" />
+              <StatTile label="Total Goals" value={globalStats.activeGoals} icon={Target} accent="indigo" />
+              <StatTile label="Clients with Asset Allocation" value={globalStats.clientsWithAllocation} icon={Wallet} accent="emerald" />
+              <StatTile label="Clients without Asset Allocation" value={globalStats.clientsWithoutAllocation} icon={PieChart} accent="amber" />
+            </div>
+          )}
+
+          {/* Per-client profile sub-nav (Back to Clients / Goal Mapping / Asset Allocation Mapping) */}
+          {inClientProfile && (
+            <div className="w-full overflow-x-auto mb-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden animate-fade-in">
+              <div className="inline-flex items-center gap-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
+                <button
+                  onClick={backToClients}
+                  className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
+                >
+                  <ChevronLeft size={14} />
+                  Back to Clients
+                </button>
+                <button
+                  onClick={() => goToGoalMapping(profileClientId)}
+                  className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                    selectedClientId
+                      ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Target size={14} />
+                  Goal Mapping
+                </button>
+                <button
+                  onClick={() => goToAssetMapping(profileClientId)}
+                  className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                    assetClientId
+                      ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10 dark:shadow-none'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Wallet size={14} />
+                  Asset Allocation Mapping
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Tab Routing */}
+          {tab === 'dashboard' && (
+            <div className="animate-scale-up">
+              <Dashboard greetingName={isViewer ? 'Viewer' : 'Admin'} />
+            </div>
+          )}
+
+          {tab === 'clients' && !selectedClientId && (
           <div className="animate-scale-up">
             <ClientList
               clients={clients}
@@ -530,10 +516,11 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-6 py-10 text-xs text-slate-400 dark:text-slate-500 text-center border-t border-slate-200/40 dark:border-slate-800/40 mt-12">
-        © {CURRENT_YEAR} Team Fintness · Building fitter financial futures
-      </footer>
+        {/* Footer */}
+        <footer className="max-w-7xl mx-auto px-6 py-10 text-xs text-slate-400 dark:text-slate-500 text-center border-t border-slate-200/40 dark:border-slate-800/40 mt-12">
+          © {CURRENT_YEAR} Team Fintness · Building fitter financial futures
+        </footer>
+      </div>
 
       {/* Modals */}
       {showAddClient && (
