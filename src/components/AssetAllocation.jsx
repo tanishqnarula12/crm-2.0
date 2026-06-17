@@ -7,7 +7,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card, Avatar, btnPrimary, btnSecondary, btnGhost, inputCls } from './UI';
 import { fmtINR, fmtFull, fmtDate } from '../utils/calc';
 import {
-  normalizeAllocation, allocationTotals, filledItems, groupComposition, sectionGroupColumns,
+  normalizeAllocation, allocationTotals, groupComposition, sectionGroupColumns,
   hasAllocation, SECTION_COLORS, fmtPct
 } from '../utils/assets';
 
@@ -119,9 +119,10 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
 
   const finRows = useMemo(() => groupComposition(alloc, 'financial'), [alloc]);
   const phyRows = useMemo(() => groupComposition(alloc, 'physical'), [alloc]);
-  const liaItems = useMemo(() => filledItems(alloc, 'liabilities'), [alloc]);
+  const liaRows = useMemo(() => groupComposition(alloc, 'liabilities'), [alloc]);
   const finCols = useMemo(() => sectionGroupColumns(alloc, 'financial').filter(c => c.items.length > 0), [alloc]);
   const phyCols = useMemo(() => sectionGroupColumns(alloc, 'physical').filter(c => c.items.length > 0), [alloc]);
+  const liaCols = useMemo(() => sectionGroupColumns(alloc, 'liabilities').filter(c => c.items.length > 0), [alloc]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -175,10 +176,11 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
           {/* Net Worth Composition — the single headline pie */}
           <NetWorthComposition t={t} />
 
-          {/* Asset & Liability Composition — class-level split of each section */}
+          {/* Asset & Liability Composition — class-level split of all three sections,
+              shown side by side: Financial Assets · Physical Assets · Loans & Liabilities */}
           <section className="space-y-4">
             <SectionHeading icon={Layers} title="Asset & Liability Composition" hint="How each section splits across classes" />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
               <CompositionCard
                 title="Financial Assets"
                 icon={TrendingUp}
@@ -195,15 +197,15 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
                 rows={phyRows}
                 emptyText="No physical assets recorded."
               />
+              <CompositionCard
+                title="Loans & Liabilities"
+                icon={CreditCard}
+                accent="rose"
+                total={t.liabilities}
+                rows={liaRows}
+                emptyText="No liabilities recorded — debt-free. 🎉"
+              />
             </div>
-            <CompositionCard
-              title="Loans & Liabilities"
-              icon={CreditCard}
-              accent="rose"
-              total={t.liabilities}
-              rows={liaItems.map(it => ({ id: it.label, label: it.label, amount: it.amount, color: SECTION_COLORS.liabilities, custom: it.isCustom }))}
-              emptyText="No liabilities recorded — this client is debt-free. 🎉"
-            />
           </section>
 
           {/* Asset Allocation Breakdown — every holding within its own asset class
@@ -233,6 +235,23 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
             {finCols.length === 0 && phyCols.length === 0 && (
               <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md">
                 <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-2">No asset holdings recorded yet.</p>
+              </Card>
+            )}
+          </section>
+
+          {/* Liability Allocation Breakdown — every liability within its own
+              category (each category column treated as 100%) */}
+          <section className="space-y-4">
+            <SectionHeading icon={CreditCard} title="Liability Allocation Breakdown" hint="Every liability within its category (category = 100%)" />
+            {liaCols.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+                {liaCols.map(col => (
+                  <AllocationDetailCard key={col.id} title={col.title} icon={CreditCard} accent="rose" total={col.total} items={col.items} emptyText="No liabilities." />
+                ))}
+              </div>
+            ) : (
+              <Card className="p-6 border border-slate-200 dark:border-slate-800 shadow-md">
+                <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-2">No liabilities recorded — this client is debt-free. 🎉</p>
               </Card>
             )}
           </section>

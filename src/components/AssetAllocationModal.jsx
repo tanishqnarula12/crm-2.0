@@ -29,14 +29,14 @@ export default function AssetAllocationModal({ clientName, initial, onClose, onS
   });
   const [custom, setCustom] = useState(() => {
     const c = { financial: [], physical: [], liabilities: [] };
-    SECTION_IDS.forEach(sid => { c[sid] = norm.custom[sid].map(x => ({ id: x.id, label: x.label, amount: String(x.amount) })); });
+    SECTION_IDS.forEach(sid => { c[sid] = norm.custom[sid].map(x => ({ id: x.id, label: x.label, amount: String(x.amount), group: x.group || '' })); });
     return c;
   });
   const [remark, setRemark] = useState(norm.remark || '');
 
   const setVal = (sid, label, str) => setValues(prev => ({ ...prev, [sid]: { ...prev[sid], [label]: str } }));
 
-  const addCustom = (sid) => setCustom(prev => ({ ...prev, [sid]: [...prev[sid], { id: uid(), label: '', amount: '' }] }));
+  const addCustom = (sid, group) => setCustom(prev => ({ ...prev, [sid]: [...prev[sid], { id: uid(), label: '', amount: '', group }] }));
   const updCustom = (sid, id, key, val) => setCustom(prev => ({ ...prev, [sid]: prev[sid].map(x => x.id === id ? { ...x, [key]: val } : x) }));
   const delCustom = (sid, id) => setCustom(prev => ({ ...prev, [sid]: prev[sid].filter(x => x.id !== id) }));
 
@@ -63,7 +63,7 @@ export default function AssetAllocationModal({ clientName, initial, onClose, onS
         if (amt > 0) clean.values[sid][it.label] = amt;
       }));
       clean.custom[sid] = custom[sid]
-        .map(x => ({ id: x.id, label: x.label.trim(), amount: parseAmt(x.amount) }))
+        .map(x => ({ id: x.id, label: x.label.trim(), amount: parseAmt(x.amount), group: x.group || '' }))
         .filter(x => x.label && x.amount > 0);
     });
     onSave(clean);
@@ -108,74 +108,66 @@ export default function AssetAllocationModal({ clientName, initial, onClose, onS
                   </span>
                 </div>
 
-                {section.groups.map(group => (
-                  <div key={group.id} className="space-y-3">
-                    <h5 className={`text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider pl-2.5 border-l-2 ${ac.bar} leading-none`}>
-                      {group.title}
-                    </h5>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                      {group.items.map(it => (
-                        <div key={it.label} className="space-y-1">
-                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                            {it.label}
-                            {it.hint && <span className="block text-[10px] font-normal text-slate-400 dark:text-slate-500 mt-0.5">{it.hint}</span>}
-                          </label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600 text-sm pointer-events-none">₹</span>
-                            <input
-                              type="number" min="0" step="any"
-                              value={values[section.id][it.label] ?? ''}
-                              onChange={(e) => setVal(section.id, it.label, e.target.value)}
-                              placeholder="0"
-                              className={inputCls + ' pl-7 tabular-nums'}
-                            />
+                {section.groups.map(group => {
+                  const groupCustom = custom[section.id].filter(x => x.group === group.id);
+                  return (
+                    <div key={group.id} className="space-y-3">
+                      <h5 className={`text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider pl-2.5 border-l-2 ${ac.bar} leading-none`}>
+                        {group.title}
+                      </h5>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                        {group.items.map(it => (
+                          <div key={it.label} className="space-y-1">
+                            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              {it.label}
+                              {it.hint && <span className="block text-[10px] font-normal text-slate-400 dark:text-slate-500 mt-0.5">{it.hint}</span>}
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600 text-sm pointer-events-none">₹</span>
+                              <input
+                                type="number" min="0" step="any"
+                                value={values[section.id][it.label] ?? ''}
+                                onChange={(e) => setVal(section.id, it.label, e.target.value)}
+                                placeholder="0"
+                                className={inputCls + ' pl-7 tabular-nums'}
+                              />
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                        ))}
+                      </div>
 
-                {/* Custom values for this section */}
-                <div className="space-y-2.5 pt-1">
-                  <div className="flex items-center justify-between">
-                    <h5 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider pl-2.5 border-l-2 border-slate-300 dark:border-slate-700 leading-none">
-                      Custom {section.kind === 'liability' ? 'Liabilities' : 'Holdings'}
-                    </h5>
-                    <button onClick={() => addCustom(section.id)} className={btnGhost + ' !px-2.5 !py-1.5'}>
-                      <Plus size={13} /> Add custom
-                    </button>
-                  </div>
-                  {custom[section.id].length === 0 ? (
-                    <p className="text-[11px] text-slate-400 dark:text-slate-600 font-medium italic pl-2.5">No custom entries. Use "Add custom" for anything not listed above.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {custom[section.id].map(row => (
-                        <div key={row.id} className="flex items-center gap-2">
-                          <input
-                            value={row.label}
-                            onChange={(e) => updCustom(section.id, row.id, 'label', e.target.value)}
-                            placeholder="Custom item name"
-                            className={inputCls + ' flex-1'}
-                          />
-                          <div className="relative w-40 shrink-0">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600 text-sm pointer-events-none">₹</span>
+                      {/* Per-group custom entries */}
+                      <div className="space-y-2 pt-0.5 pl-2.5">
+                        {groupCustom.map(row => (
+                          <div key={row.id} className="flex items-center gap-2">
                             <input
-                              type="number" min="0" step="any"
-                              value={row.amount}
-                              onChange={(e) => updCustom(section.id, row.id, 'amount', e.target.value)}
-                              placeholder="0"
-                              className={inputCls + ' pl-7 tabular-nums'}
+                              value={row.label}
+                              onChange={(e) => updCustom(section.id, row.id, 'label', e.target.value)}
+                              placeholder={`Custom ${group.title.toLowerCase()} item`}
+                              className={inputCls + ' flex-1'}
                             />
+                            <div className="relative w-40 shrink-0">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600 text-sm pointer-events-none">₹</span>
+                              <input
+                                type="number" min="0" step="any"
+                                value={row.amount}
+                                onChange={(e) => updCustom(section.id, row.id, 'amount', e.target.value)}
+                                placeholder="0"
+                                className={inputCls + ' pl-7 tabular-nums'}
+                              />
+                            </div>
+                            <button onClick={() => delCustom(section.id, row.id)} title="Remove" className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0">
+                              <Trash2 size={15} />
+                            </button>
                           </div>
-                          <button onClick={() => delCustom(section.id, row.id)} title="Remove" className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      ))}
+                        ))}
+                        <button onClick={() => addCustom(section.id, group.id)} className={btnGhost + ' !px-2.5 !py-1.5'}>
+                          <Plus size={13} /> Add custom to {group.title}
+                        </button>
+                      </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })}
               </section>
             );
           })}

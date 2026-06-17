@@ -94,18 +94,31 @@ export const ASSET_SCHEMA = [
     accent: 'rose',
     groups: [
       {
-        id: 'loans',
-        title: 'Loans & Liabilities',
+        id: 'secured',
+        title: 'Secured Loans',
         items: [
           { label: 'Home Loan' },
           { label: 'Loan Against Property (LAP)' },
           { label: 'Vehicle Loan' },
           { label: 'Gold Loan' },
           { label: 'Loan Against Securities' },
+        ],
+      },
+      {
+        id: 'unsecured',
+        title: 'Unsecured Loans',
+        items: [
           { label: 'Personal Loan' },
           { label: 'Education Loan' },
           { label: 'Business Loan' },
+        ],
+      },
+      {
+        id: 'other',
+        title: 'Other Liabilities',
+        items: [
           { label: 'Short-Term Liabilities' },
+          { label: 'Credit Card Dues' },
           { label: 'Other Payables' },
         ],
       },
@@ -141,7 +154,10 @@ export const GROUP_COLORS = {
   commodity: '#f59e0b',     // amber
   realEstate: '#f97316',    // orange
   preciousMetals: '#eab308',// gold
-  loans: '#ef4444',         // rose
+  secured: '#e11d48',       // rose-600
+  unsecured: '#f43f5e',     // rose-500
+  other: '#fb7185',         // rose-400
+  loans: '#ef4444',         // rose (legacy single liability group)
 };
 export const CUSTOM_COLOR = '#94a3b8'; // slate — used for custom buckets
 
@@ -179,7 +195,7 @@ export function normalizeAllocation(a) {
     }
     const c = a.custom && Array.isArray(a.custom[sid]) ? a.custom[sid] : [];
     base.custom[sid] = c
-      .map(x => ({ id: x.id || ('id_' + Math.random().toString(36).slice(2, 9)), label: String(x.label || '').trim(), amount: Number(x.amount) || 0 }))
+      .map(x => ({ id: x.id || ('id_' + Math.random().toString(36).slice(2, 9)), label: String(x.label || '').trim(), amount: Number(x.amount) || 0, group: String(x.group || '') }))
       .filter(x => x.label && x.amount > 0);
   });
   base.remark = typeof a.remark === 'string' ? a.remark : '';
@@ -204,7 +220,9 @@ export function groupTotal(alloc, sectionId, groupId) {
   const section = getSection(sectionId);
   const group = section?.groups.find(g => g.id === groupId);
   if (!group) return 0;
-  return group.items.reduce((s, it) => s + (Number(a.values[sectionId][it.label]) || 0), 0);
+  const standard = group.items.reduce((s, it) => s + (Number(a.values[sectionId][it.label]) || 0), 0);
+  const custom = (a.custom[sectionId] || []).filter(x => x.group === groupId).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  return standard + custom;
 }
 
 export function allocationTotals(alloc) {
@@ -258,45 +276,55 @@ export function filledGroupItems(alloc, sectionId, groupId) {
 }
 
 // Per-group columns for the allocation breakdown: each group with its filled
-// entries, group total and colour. A "Custom Holdings" pseudo-group is appended
-// when the section has custom rows so nothing the advisor entered is lost.
+// entries (standard items + that group's custom rows), group total and colour.
+// Custom rows that don't belong to any known group fall into a trailing
+// "Custom Holdings" column so nothing the advisor entered is ever lost.
 export function sectionGroupColumns(alloc, sectionId) {
   const a = normalizeAllocation(alloc);
   const section = getSection(sectionId);
   if (!section) return [];
+  const groupIds = new Set(section.groups.map(g => g.id));
+  const customFor = (gid) => (a.custom[sectionId] || [])
+    .filter(x => x.group === gid && x.amount > 0)
+    .map(x => ({ label: x.label, amount: x.amount, color: GROUP_COLORS[gid] || CUSTOM_COLOR, isCustom: true }));
+
   const cols = section.groups.map(g => {
-    const items = filledGroupItems(a, sectionId, g.id);
+    const items = [...filledGroupItems(a, sectionId, g.id), ...customFor(g.id)].sort((x, y) => y.amount - x.amount);
     return { id: g.id, title: g.title, color: GROUP_COLORS[g.id] || CUSTOM_COLOR, items, total: items.reduce((s, it) => s + it.amount, 0) };
   });
-  const customRows = (a.custom[sectionId] || []).filter(x => x.amount > 0).sort((x, y) => y.amount - x.amount);
-  if (customRows.length > 0) {
+
+  const ungrouped = (a.custom[sectionId] || []).filter(x => x.amount > 0 && !groupIds.has(x.group)).sort((x, y) => y.amount - x.amount);
+  if (ungrouped.length > 0) {
     cols.push({
       id: '__custom',
       title: 'Custom Holdings',
       color: CUSTOM_COLOR,
-      items: customRows.map(x => ({ label: x.label, amount: x.amount, color: CUSTOM_COLOR, isCustom: true })),
-      total: customRows.reduce((s, x) => s + x.amount, 0),
+      items: ungrouped.map(x => ({ label: x.label, amount: x.amount, color: CUSTOM_COLOR, isCustom: true })),
+      total: ungrouped.reduce((s, x) => s + x.amount, 0),
     });
   }
   return cols;
 }
 
 // Group-level composition for a section (e.g. Equity / Debt / Commodity for
-// financial; Real Estate / Precious Metals for physical), plus a combined
-// "Custom Holdings" bucket. Zero rows dropped, sorted high → low. The amounts
-// always sum to the section total, so percentages add up to 100%.
+// financial; Secured / Unsecured / Other for liabilities). Each group's amount
+// includes both standard items and that group's custom rows. Any ungrouped
+// custom rows roll into a combined "Custom Holdings" bucket. Zero rows dropped,
+// sorted high → low; amounts always sum to the section total.
 export function groupComposition(alloc, sectionId) {
   const a = normalizeAllocation(alloc);
   const section = getSection(sectionId);
   if (!section) return [];
+  const groupIds = new Set(section.groups.map(g => g.id));
   const rows = section.groups
     .map(g => {
-      const amount = g.items.reduce((s, it) => s + (Number(a.values[sectionId][it.label]) || 0), 0);
-      return { id: g.id, label: g.title, amount, color: GROUP_COLORS[g.id] || CUSTOM_COLOR };
+      const standard = g.items.reduce((s, it) => s + (Number(a.values[sectionId][it.label]) || 0), 0);
+      const custom = (a.custom[sectionId] || []).filter(x => x.group === g.id).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      return { id: g.id, label: g.title, amount: standard + custom, color: GROUP_COLORS[g.id] || CUSTOM_COLOR };
     })
     .filter(r => r.amount > 0);
-  const customTotal = (a.custom[sectionId] || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
-  if (customTotal > 0) rows.push({ id: '__custom', label: 'Custom Holdings', amount: customTotal, color: CUSTOM_COLOR });
+  const ungrouped = (a.custom[sectionId] || []).filter(x => !groupIds.has(x.group)).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  if (ungrouped > 0) rows.push({ id: '__custom', label: 'Custom Holdings', amount: ungrouped, color: CUSTOM_COLOR });
   return rows.sort((x, y) => y.amount - x.amount);
 }
 
