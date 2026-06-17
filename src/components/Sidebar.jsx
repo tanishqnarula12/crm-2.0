@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import {
   LayoutDashboard, UserPlus, Users, Briefcase, ListChecks, CalendarDays,
-  MessageSquare, ShieldCheck, FileText, FileBarChart, Settings, LifeBuoy,
-  Search, ChevronsLeft, ChevronsRight, Plus
+  MessageSquare, ShieldCheck, FileText, Settings, LifeBuoy,
+  Search, ChevronsLeft, ChevronsRight, Plus, Target, Wallet, FileBarChart
 } from 'lucide-react';
 
 // Sidebar nav. Items with a `view` are wired to a real app section; the rest
@@ -17,7 +17,13 @@ const NAV_ITEMS = [
   { id: 'chats', label: 'Chats', icon: MessageSquare },
   { id: 'insurance', label: 'Insurance', icon: ShieldCheck },
   { id: 'documents', label: 'Documents', icon: FileText },
-  { id: 'reports', label: 'Reports', icon: FileBarChart, view: 'reports' },
+];
+
+// Real, working sections of the Goal Management System.
+const GOAL_MGMT_ITEMS = [
+  { id: 'goals', label: 'Goals Summary', icon: Target, view: 'goals' },
+  { id: 'assets', label: 'Asset Allocation', icon: Wallet, view: 'assets' },
+  { id: 'reports', label: 'Timeline Reports', icon: FileBarChart, view: 'reports' },
 ];
 
 function NavItem({ icon: Icon, label, active, collapsed, onClick, disabled }) {
@@ -99,6 +105,23 @@ export default function Sidebar({ tab, onNavigate, onAddClient, isViewer }) {
             onClick={() => item.view && onNavigate(item.view)}
           />
         ))}
+
+        {/* Working Goal Management features */}
+        <div className={`pt-3 mt-2 border-t border-slate-800/80 ${collapsed ? '' : 'px-1'}`}>
+          {!collapsed && <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-2 pb-2">Goal Management</p>}
+          <div className="space-y-1">
+            {GOAL_MGMT_ITEMS.map(item => (
+              <NavItem
+                key={item.id}
+                icon={item.icon}
+                label={item.label}
+                active={tab === item.view}
+                collapsed={collapsed}
+                onClick={() => onNavigate(item.view)}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Bottom: Settings / Support (visual only) */}
