@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X, Plus, Trash2, Wallet, MessageSquare, Check } from 'lucide-react';
+import { X, Plus, Trash2, Wallet, MessageSquare, Check, BarChart2 } from 'lucide-react';
 import { inputCls, btnPrimary, btnGhost } from './UI';
 import { fmtFull, fmtINR, uid } from '../utils/calc';
 import { ASSET_SCHEMA, SECTION_IDS, normalizeAllocation } from '../utils/assets';
@@ -33,6 +33,7 @@ export default function AssetAllocationModal({ clientName, initial, onClose, onS
     return c;
   });
   const [remark, setRemark] = useState(norm.remark || '');
+  const [peRatio, setPeRatio] = useState(norm.peRatio || '');
 
   const setVal = (sid, label, str) => setValues(prev => ({ ...prev, [sid]: { ...prev[sid], [label]: str } }));
 
@@ -66,6 +67,7 @@ export default function AssetAllocationModal({ clientName, initial, onClose, onS
         .map(x => ({ id: x.id, label: x.label.trim(), amount: parseAmt(x.amount), group: x.group || '' }))
         .filter(x => x.label && x.amount > 0);
     });
+    clean.peRatio = peRatio.trim();
     onSave(clean);
   };
 
@@ -171,6 +173,28 @@ export default function AssetAllocationModal({ clientName, initial, onClose, onS
               </section>
             );
           })}
+
+          {/* P/E Ratio */}
+          <section className="space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                <BarChart2 size={16} />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest">P/E Ratio</h4>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Price to Earnings ratio — optional portfolio metric</p>
+              </div>
+            </div>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={peRatio}
+              onChange={(e) => setPeRatio(e.target.value)}
+              placeholder="e.g. 22.5"
+              className={inputCls + ' w-48 tabular-nums'}
+            />
+          </section>
 
           {/* Remark */}
           <section className="space-y-2.5">

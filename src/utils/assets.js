@@ -176,6 +176,7 @@ export function emptyAllocation() {
     values: { financial: {}, physical: {}, liabilities: {} },
     custom: { financial: [], physical: [], liabilities: [] },
     remark: '',
+    peRatio: '',
     history: [],
     updatedAt: null,
   };
@@ -199,6 +200,7 @@ export function normalizeAllocation(a) {
       .filter(x => x.label && x.amount > 0);
   });
   base.remark = typeof a.remark === 'string' ? a.remark : '';
+  base.peRatio = (typeof a.peRatio === 'string' || typeof a.peRatio === 'number') ? String(a.peRatio || '').trim() : '';
   base.history = Array.isArray(a.history) ? a.history : [];
   base.updatedAt = a.updatedAt || null;
   return base;

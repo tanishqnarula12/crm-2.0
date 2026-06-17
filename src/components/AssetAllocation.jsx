@@ -152,10 +152,9 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
         </div>
 
         {allocated && (
-          <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <NetTile label="Net Worth" value={fmtFull(t.netWorth)} accent="slate" big negative={t.netWorth < 0} icon={Scale} />
-            <NetTile label="Financial Assets" value={fmtINR(t.financial)} accent="indigo" icon={TrendingUp} />
-            <NetTile label="Physical Assets" value={fmtINR(t.physical)} accent="amber" icon={Home} />
+          <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <NetTile label="Net Worth" value={fmtFull(t.netWorth)} accent="emerald" big negative={t.netWorth < 0} icon={Scale} />
+            <NetTile label="Total Assets" value={fmtINR(t.totalAssets)} accent="slate" icon={Wallet} />
             <NetTile label="Loans & Liabilities" value={fmtINR(t.liabilities)} accent="rose" icon={CreditCard} />
           </div>
         )}
@@ -174,7 +173,7 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
       ) : (
         <>
           {/* Net Worth Composition — the single headline pie */}
-          <NetWorthComposition t={t} />
+          <NetWorthComposition t={t} peRatio={alloc.peRatio} />
 
           {/* Asset & Liability Composition — class-level split of all three sections,
               shown side by side: Financial Assets · Physical Assets · Loans & Liabilities */}
@@ -274,6 +273,7 @@ function NetTile({ label, value, accent, big, negative, icon: Icon }) {
     indigo: 'bg-indigo-50/60 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-400',
     amber: 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40 text-amber-700 dark:text-amber-400',
     rose: 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400',
+    emerald: 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400',
   };
   return (
     <div className={`rounded-2xl border p-5 flex items-start justify-between gap-2 ${accents[accent]}`}>
@@ -302,7 +302,7 @@ function SectionHeading({ icon: Icon, title, hint }) {
 }
 
 // --- Net Worth Composition — headline pie (financial / physical / liabilities)
-function NetWorthComposition({ t }) {
+function NetWorthComposition({ t, peRatio }) {
   const data = [
     { name: 'Financial Assets', value: t.financial, color: SECTION_COLORS.financial },
     { name: 'Physical Assets', value: t.physical, color: SECTION_COLORS.physical },
@@ -350,17 +350,15 @@ function NetWorthComposition({ t }) {
                 ))}
               </div>
 
-              {/* Summary tiles — 2-col mini grid */}
-              <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
-                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-200/60 dark:border-slate-800/60">
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">Total Assets</p>
-                  <p className="text-base font-black text-slate-900 dark:text-white tabular-nums">{fmtINR(t.totalAssets)}</p>
+              {/* P/E Ratio */}
+              {peRatio && (
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+                  <div className="inline-flex flex-col bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl px-4 py-3">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">P/E Ratio</p>
+                    <p className="text-base font-black text-indigo-700 dark:text-indigo-400 tabular-nums">{peRatio}x</p>
+                  </div>
                 </div>
-                <div className={`rounded-xl px-4 py-3 border ${t.netWorth < 0 ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/60 dark:border-rose-900/40' : 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-900/40'}`}>
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">Net Worth</p>
-                  <p className={`text-base font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{fmtFull(t.netWorth)}</p>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}
