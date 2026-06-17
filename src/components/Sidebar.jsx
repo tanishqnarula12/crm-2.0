@@ -1,30 +1,23 @@
 import React, { useState } from 'react';
 import {
-  Home, LayoutGrid, Users2, FileText, CheckSquare, CalendarDays, Phone,
-  ClipboardList, ShoppingCart, Receipt, Layers, Settings, LifeBuoy, Search,
-  ChevronsLeft, ChevronsRight, Plus, Users, Target, Wallet, FileBarChart
+  LayoutDashboard, UserPlus, Users, Briefcase, ListChecks, CalendarDays,
+  MessageSquare, ShieldCheck, FileText, FileBarChart, Settings, LifeBuoy,
+  Search, ChevronsLeft, ChevronsRight, Plus
 } from 'lucide-react';
 
-// Screenshot-only nav items — visual placeholders, not wired to any view yet.
-const PLACEHOLDER_ITEMS = [
-  { id: 'workspace', label: 'Workspace', icon: LayoutGrid },
-  { id: 'leads', label: 'Leads', icon: Users2 },
-  { id: 'applicants', label: 'Applicants', icon: FileText },
-  { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-  { id: 'meetings', label: 'Meetings', icon: CalendarDays },
-  { id: 'calls', label: 'Calls', icon: Phone },
-  { id: 'bookings', label: 'Bookings', icon: ClipboardList },
-  { id: 'salesOrders', label: 'Sales Orders', icon: ShoppingCart },
-  { id: 'invoices', label: 'Invoices', icon: Receipt },
-  { id: 'solutions', label: 'Solutions', icon: Layers },
-];
-
-// Real, functional sections of this app.
-const APP_ITEMS = [
-  { id: 'clients', label: 'Clients', icon: Users },
-  { id: 'goals', label: 'Goals Summary', icon: Target },
-  { id: 'assets', label: 'Asset Allocation', icon: Wallet },
-  { id: 'reports', label: 'Timeline Reports', icon: FileBarChart },
+// Sidebar nav. Items with a `view` are wired to a real app section; the rest
+// are visual placeholders for the planned CRM product (non-functional for now).
+const NAV_ITEMS = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, view: 'dashboard' },
+  { id: 'leads', label: 'Leads', icon: UserPlus },
+  { id: 'clients', label: 'Clients', icon: Users, view: 'clients' },
+  { id: 'prospects', label: 'Business Prospects', icon: Briefcase },
+  { id: 'tasks', label: 'Tasks', icon: ListChecks },
+  { id: 'meeting', label: 'Meeting', icon: CalendarDays },
+  { id: 'chats', label: 'Chats', icon: MessageSquare },
+  { id: 'insurance', label: 'Insurance', icon: ShieldCheck },
+  { id: 'documents', label: 'Documents', icon: FileText },
+  { id: 'reports', label: 'Reports', icon: FileBarChart, view: 'reports' },
 ];
 
 function NavItem({ icon: Icon, label, active, collapsed, onClick, disabled }) {
@@ -93,28 +86,19 @@ export default function Sidebar({ tab, onNavigate, onAddClient, isViewer }) {
         </div>
       )}
 
-      {/* Scrollable nav */}
+      {/* Nav items */}
       <div className="flex-1 overflow-y-auto px-3 space-y-1 [scrollbar-width:thin]">
-        <NavItem icon={Home} label="Home" active={tab === 'dashboard'} collapsed={collapsed} onClick={() => onNavigate('dashboard')} />
-        {PLACEHOLDER_ITEMS.map(item => (
-          <NavItem key={item.id} icon={item.icon} label={item.label} collapsed={collapsed} disabled onClick={() => {}} />
+        {NAV_ITEMS.map(item => (
+          <NavItem
+            key={item.id}
+            icon={item.icon}
+            label={item.label}
+            active={item.view && tab === item.view}
+            collapsed={collapsed}
+            disabled={!item.view}
+            onClick={() => item.view && onNavigate(item.view)}
+          />
         ))}
-
-        <div className={`pt-3 mt-2 border-t border-slate-800/80 ${collapsed ? '' : 'px-1'}`}>
-          {!collapsed && <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-2 pb-2">Goal Management</p>}
-          <div className="space-y-1">
-            {APP_ITEMS.map(item => (
-              <NavItem
-                key={item.id}
-                icon={item.icon}
-                label={item.label}
-                active={tab === item.id}
-                collapsed={collapsed}
-                onClick={() => onNavigate(item.id)}
-              />
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* Bottom: Settings / Support (visual only) */}
