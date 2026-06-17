@@ -317,9 +317,9 @@ function NetWorthComposition({ t, peRatio }) {
         {gross === 0 ? (
           <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-6">No values recorded yet.</p>
         ) : (
-          <div className="flex flex-col md:flex-row gap-8 items-stretch">
-            {/* Pie chart — fixed width, centered vertically */}
-            <div className="flex items-center justify-center md:justify-start shrink-0">
+          <div className="flex flex-col lg:flex-row gap-8 items-center lg:items-start">
+            {/* Pie chart */}
+            <div className="flex items-center justify-center shrink-0">
               <div className="relative w-44 h-44">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -336,29 +336,49 @@ function NetWorthComposition({ t, peRatio }) {
               </div>
             </div>
 
-            {/* Right side — legend rows + P/E ratio */}
-            <div className="w-full md:w-72 shrink-0 flex flex-col justify-between gap-4">
-              {/* Legend rows */}
-              <div className="space-y-2.5">
-                {data.map((d, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
-                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1 truncate">{d.name}</span>
-                    <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(d.value)}</span>
-                    <span className="text-xs font-bold text-slate-400 dark:text-slate-500 tabular-nums w-12 text-right">{fmtPct(d.value, gross)}</span>
-                  </div>
-                ))}
+            {/* Right side — fills remaining card width */}
+            <div className="flex-1 min-w-0 space-y-5">
+              {/* Legend rows with progress bars */}
+              <div className="space-y-4">
+                {data.map((d, i) => {
+                  const pctNum = gross > 0 ? (d.value / gross) * 100 : 0;
+                  return (
+                    <div key={i}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+                          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">{d.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(d.value)}</span>
+                          <span className="text-xs font-bold tabular-nums w-10 text-right" style={{ color: d.color }}>{fmtPct(d.value, gross)}</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(1, pctNum)}%`, backgroundColor: d.color }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* P/E Ratio */}
-              {peRatio && (
-                <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
-                  <div className="inline-flex flex-col bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl px-4 py-3">
-                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">P/E Ratio</p>
-                    <p className="text-base font-black text-indigo-700 dark:text-indigo-400 tabular-nums">{peRatio}x</p>
-                  </div>
+              {/* Bottom stat tiles */}
+              <div className={`grid gap-3 pt-4 border-t border-slate-200 dark:border-slate-800 ${peRatio ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-200/60 dark:border-slate-800/60">
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Total Assets</p>
+                  <p className="text-sm font-black text-slate-900 dark:text-white tabular-nums">{fmtINR(t.totalAssets)}</p>
                 </div>
-              )}
+                <div className={`rounded-xl px-4 py-3 border ${t.netWorth < 0 ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/60 dark:border-rose-900/40' : 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-900/40'}`}>
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Net Worth</p>
+                  <p className={`text-sm font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{fmtFull(t.netWorth)}</p>
+                </div>
+                {peRatio && (
+                  <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl px-4 py-3">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">P/E Ratio</p>
+                    <p className="text-sm font-black text-indigo-700 dark:text-indigo-400 tabular-nums">{peRatio}x</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
