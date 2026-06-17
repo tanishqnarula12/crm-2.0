@@ -317,38 +317,48 @@ function NetWorthComposition({ t }) {
         {gross === 0 ? (
           <p className="text-sm text-slate-400 dark:text-slate-500 font-medium text-center py-6">No values recorded yet.</p>
         ) : (
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-8 lg:gap-14">
-            <div className="relative w-52 h-52 shrink-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={86} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
-                    {data.map((d, i) => <Cell key={i} fill={d.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(v, n) => [fmtINR(v), n]} contentStyle={tooltipStyle} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Net Worth</span>
-                <span className={`text-xl font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{fmtINR(t.netWorth)}</span>
+          <div className="flex flex-col md:flex-row gap-8 items-stretch">
+            {/* Pie chart — fixed width, centered vertically */}
+            <div className="flex items-center justify-center md:justify-start shrink-0">
+              <div className="relative w-44 h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={76} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
+                      {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(v, n) => [fmtINR(v), n]} contentStyle={tooltipStyle} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Net Worth</span>
+                  <span className={`text-base font-black tabular-nums leading-tight ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>{fmtINR(t.netWorth)}</span>
+                </div>
               </div>
             </div>
-            <div className="w-full sm:max-w-sm space-y-3">
-              {data.map((d, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
-                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1 truncate">{d.name}</span>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(d.value)}</span>
-                  <span className="text-xs font-bold text-slate-400 dark:text-slate-500 tabular-nums w-14 text-right">{fmtPct(d.value, gross)}</span>
+
+            {/* Right side — legend rows + summary stats, fills remaining width */}
+            <div className="flex-1 min-w-0 flex flex-col justify-between gap-4">
+              {/* Legend rows */}
+              <div className="space-y-2.5">
+                {data.map((d, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1 truncate">{d.name}</span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(d.value)}</span>
+                    <span className="text-xs font-bold text-slate-400 dark:text-slate-500 tabular-nums w-12 text-right">{fmtPct(d.value, gross)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Summary tiles — 2-col mini grid */}
+              <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-200/60 dark:border-slate-800/60">
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">Total Assets</p>
+                  <p className="text-base font-black text-slate-900 dark:text-white tabular-nums">{fmtINR(t.totalAssets)}</p>
                 </div>
-              ))}
-              <div className="pt-3 mt-1 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Assets</span>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">{fmtINR(t.totalAssets)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Net Worth</span>
-                  <span className={`text-base font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{fmtFull(t.netWorth)}</span>
+                <div className={`rounded-xl px-4 py-3 border ${t.netWorth < 0 ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/60 dark:border-rose-900/40' : 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-900/40'}`}>
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">Net Worth</p>
+                  <p className={`text-base font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{fmtFull(t.netWorth)}</p>
                 </div>
               </div>
             </div>
