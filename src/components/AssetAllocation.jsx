@@ -321,10 +321,10 @@ function NetWorthComposition({ t, peRatio }) {
           <div className="flex flex-col lg:flex-row gap-8 items-center lg:items-start">
             {/* Pie chart */}
             <div className="flex items-center justify-center shrink-0">
-              <div className="relative w-44 h-44">
+              <div className="relative w-64 h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={76} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
+                    <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={108} paddingAngle={data.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
                       {data.map((d, i) => <Cell key={i} fill={d.color} />)}
                     </Pie>
                     <Tooltip formatter={(v, n) => [fmtINR(v), n]} contentStyle={tooltipStyle} />
