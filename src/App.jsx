@@ -282,6 +282,7 @@ export default function App() {
       values: patch.values || prev.values,
       custom: patch.custom || prev.custom,
       remark: patch.remark !== undefined ? patch.remark : prev.remark,
+      peRatio: patch.peRatio !== undefined ? patch.peRatio : prev.peRatio,
     });
     const changes = buildAllocationEdits(prev, merged);
     if (changes.length === 0) return; // nothing actually changed — skip the write

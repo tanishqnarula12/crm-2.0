@@ -369,6 +369,9 @@ export function buildAllocationEdits(prev, next) {
   const pr = (prev && prev.remark) || '';
   const nr = (next && next.remark) || '';
   if (pr !== nr) edits.push({ label: 'Remark', from: pr || '—', to: nr || '—' });
+  const pe1 = (prev && String(prev.peRatio || '').trim()) || '';
+  const pe2 = (next && String(next.peRatio || '').trim()) || '';
+  if (pe1 !== pe2) edits.push({ label: 'P/E Ratio', from: pe1 ? `${pe1}x` : '—', to: pe2 ? `${pe2}x` : '—' });
   return edits;
 }
 
