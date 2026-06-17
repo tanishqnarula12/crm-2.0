@@ -336,8 +336,8 @@ function NetWorthComposition({ t, peRatio }) {
               </div>
             </div>
 
-            {/* Right side — legend rows + summary stats, fills remaining width */}
-            <div className="flex-1 min-w-0 flex flex-col justify-between gap-4">
+            {/* Right side — legend rows + P/E ratio */}
+            <div className="w-full md:w-72 shrink-0 flex flex-col justify-between gap-4">
               {/* Legend rows */}
               <div className="space-y-2.5">
                 {data.map((d, i) => (
