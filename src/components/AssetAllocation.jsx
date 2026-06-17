@@ -154,7 +154,7 @@ export function AssetAllocationDetail({ client, onEdit, onSaveRemark, isViewer }
         {allocated && (
           <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 md:grid-cols-3 gap-3">
             <NetTile label="Net Worth" value={fmtFull(t.netWorth)} accent="emerald" big negative={t.netWorth < 0} icon={Scale} />
-            <NetTile label="Total Assets" value={fmtINR(t.totalAssets)} accent="slate" icon={Wallet} />
+            <NetTile label="Total Assets" value={fmtINR(t.totalAssets)} accent="violet" icon={Wallet} />
             <NetTile label="Loans & Liabilities" value={fmtINR(t.liabilities)} accent="rose" icon={CreditCard} />
           </div>
         )}
@@ -274,6 +274,7 @@ function NetTile({ label, value, accent, big, negative, icon: Icon }) {
     amber: 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40 text-amber-700 dark:text-amber-400',
     rose: 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400',
     emerald: 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400',
+    violet: 'bg-violet-50/60 dark:bg-violet-950/20 border-violet-200 dark:border-violet-900/40 text-violet-700 dark:text-violet-400',
   };
   return (
     <div className={`rounded-2xl border p-5 flex items-start justify-between gap-2 ${accents[accent]}`}>
@@ -362,23 +363,15 @@ function NetWorthComposition({ t, peRatio }) {
                 })}
               </div>
 
-              {/* Bottom stat tiles */}
-              <div className={`grid gap-3 pt-4 border-t border-slate-200 dark:border-slate-800 ${peRatio ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-200/60 dark:border-slate-800/60">
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Total Assets</p>
-                  <p className="text-sm font-black text-slate-900 dark:text-white tabular-nums">{fmtINR(t.totalAssets)}</p>
-                </div>
-                <div className={`rounded-xl px-4 py-3 border ${t.netWorth < 0 ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/60 dark:border-rose-900/40' : 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-900/40'}`}>
-                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Net Worth</p>
-                  <p className={`text-sm font-black tabular-nums ${t.netWorth < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{fmtFull(t.netWorth)}</p>
-                </div>
-                {peRatio && (
-                  <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl px-4 py-3">
+              {/* P/E Ratio tile */}
+              {peRatio && (
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+                  <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl px-4 py-3 w-fit min-w-[140px]">
                     <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">P/E Ratio</p>
                     <p className="text-sm font-black text-indigo-700 dark:text-indigo-400 tabular-nums">{peRatio}x</p>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         )}
