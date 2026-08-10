@@ -1,25 +1,68 @@
-// Task management — lightweight localStorage-backed store.
-// Tasks are independent of the Supabase clients/goals data, so they persist
-// locally per browser. Swappable for a DB-backed service later.
+// Task management — backed by the CRM API (Postgres).
+//
+// Same "in-memory cache hydrated from the API" seam as services/leads.js:
+// `loadTasks()` stays synchronous (components and services/leads.js itself
+// call it mid-function), and `saveTasks()` updates the cache immediately
+// while persisting the whole array to the server in the background — the
+// same "rewrite the whole list" semantic `localStorage.setItem` used to have.
 
-const KEY = 'crm:tasks';
+import { api } from '../services/api';
 
-export const loadTasks = () => {
+let cache = [];
+
+export const loadTasks = () => cache;
+
+// Fetches every task from the server and populates the cache. Call once on
+// login/app-load (App.jsx `loadData`) before any component reads tasks.
+export async function hydrateTasks() {
+  const { tasks } = await api.get('/tasks');
+  cache = Array.isArray(tasks) ? tasks : [];
+  window.dispatchEvent(new Event('crm:tasks-updated'));
+  return cache;
+}
+
+// CLOSED tasks (Completed/Lost) for one client, visible to ANYONE who can view
+// that client — not just the task participants. Used by the Client Profile's
+// "Closed Activities" so completed work is transparent to the whole team,
+// while open/in-progress tasks stay confidential (those come from the normal
+// RBAC-filtered cache above). Not cached — fetched per profile open.
+export async function fetchClosedTasksForClient(clientId) {
+  if (!clientId) return [];
   try {
-    const raw = localStorage.getItem(KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    const { tasks } = await api.get(`/tasks/closed-for-client/${clientId}`);
+    return Array.isArray(tasks) ? tasks : [];
   } catch {
-    return [];
+    return []; // client not viewable / server hiccup — show nothing extra
   }
-};
+}
 
 export const saveTasks = (tasks) => {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(tasks));
-  } catch {
-    /* ignore quota / serialization errors */
-  }
+  cache = tasks;
+  window.dispatchEvent(new Event('crm:tasks-updated'));
+  // The server validates every change (RBAC) and returns the authoritative
+  // list; reconcile so any rejected edit reverts in the UI — and tell the user
+  // when that happens, so a blocked change doesn't just silently "not stick"
+  // with no explanation (e.g. an assignee trying to edit task details, or
+  // moving a stage backward).
+  api.put('/tasks', { tasks })
+    .then((res) => {
+      if (Array.isArray(res?.tasks)) {
+        cache = res.tasks;
+        window.dispatchEvent(new Event('crm:tasks-updated'));
+      }
+      if (res?.stats?.rejected > 0) {
+        window.dispatchEvent(new CustomEvent('crm:tasks-sync-warning', {
+          detail: { message: `${res.stats.rejected} change${res.stats.rejected === 1 ? '' : 's'} could not be saved — you may not have permission. The list has been refreshed.` },
+        }));
+      }
+    })
+    .catch((err) => {
+      console.error('Failed to persist tasks:', err);
+      hydrateTasks().catch(() => {});
+      window.dispatchEvent(new CustomEvent('crm:tasks-sync-warning', {
+        detail: { message: 'Your change could not be saved. The list has been refreshed.' },
+      }));
+    });
 };
 
 export const TASK_STAGES = [
@@ -29,6 +72,17 @@ export const TASK_STAGES = [
   'Completed',
   'Lost',
 ];
+
+// Sub-people on a task/COBR record: the extra participants beyond the assigner
+// and assignee, each of whom may add comments/logs (but not change the stage).
+// Stored as the `subPersons` ARRAY; records created before multi-select carry a
+// single `subPerson` string instead, so both shapes are read here — and both
+// are written on save (see the modals), which keeps a browser still running an
+// older bundle working. Mirrors taskSubPersons() in the permission engines.
+export const readSubPersons = (t) => {
+  if (Array.isArray(t?.subPersons)) return t.subPersons.filter(Boolean);
+  return t?.subPerson ? [t.subPerson] : [];
+};
 
 // Visual theme per stage (badge colours)
 export const STAGE_THEME = {
@@ -63,12 +117,15 @@ export const NFT_TYPES = [
   'PAN Card Updations',
   'PAN, KYC & FATCA Updation',
   'FATCA Updation',
-  'IIN & FATCA Creation',
+  'IIN, Mandate and FATCA Creation',
   'Mandate Creation',
   'Unit Transmission',
   'Change of IFSC',
   'Nominee Updation',
   'DOB Updation',
+  'SIP Consolidation',
+  'SIP Cancellation',
+  'SIP Registration',
 ];
 
 // AMC list — multi-select shown when "Related to" = NFT

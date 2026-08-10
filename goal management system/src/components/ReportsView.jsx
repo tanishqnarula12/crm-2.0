@@ -1,6 +1,6 @@
 import React from 'react';
 import { CheckCircle2 } from 'lucide-react';
-import { Card, Avatar, Field, selectCls } from './UI';
+import { Card, Avatar, Field, selectCls, CoolSelect } from './UI';
 import { goalEmoji, monthLabel, fmtINR, fmtSip, achievementBadge, CURRENT_MONTH, CURRENT_YEAR } from '../utils/calc';
 
 export default function ReportsView({ goalNames, goalFilter, setGoalFilter, timeframe, setTimeframe, rows, onOpenClient }) {
@@ -15,15 +15,15 @@ export default function ReportsView({ goalNames, goalFilter, setGoalFilter, time
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Goal Category Filter">
             <div className="relative">
-              <select value={goalFilter} onChange={(e) => setGoalFilter(e.target.value)} className={selectCls}>
+              <CoolSelect value={goalFilter} onChange={(e) => setGoalFilter(e.target.value)} className={selectCls}>
                 <option value="all">All Goal Categories</option>
                 {goalNames.map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </CoolSelect>
             </div>
           </Field>
           <Field label="Target Time Horizon">
             <div className="relative">
-              <select value={timeframe} onChange={(e) => setTimeframe(Number(e.target.value))} className={selectCls}>
+              <CoolSelect value={timeframe} onChange={(e) => setTimeframe(Number(e.target.value))} className={selectCls}>
                 <option value={1}>1 Year Horizon</option>
                 <option value={3}>3 Years Horizon</option>
                 <option value={5}>5 Years Horizon</option>
@@ -31,7 +31,7 @@ export default function ReportsView({ goalNames, goalFilter, setGoalFilter, time
                 <option value={15}>15 Years Horizon</option>
                 <option value={20}>20 Years Horizon</option>
                 <option value={50}>All timeframes</option>
-              </select>
+              </CoolSelect>
             </div>
           </Field>
         </div>

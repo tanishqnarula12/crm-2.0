@@ -1,11 +1,15 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  FolderOpen, FileText, Target, Shield, Search, X, Printer, Eye, CalendarDays, Wallet, FileBarChart, Upload, Paperclip
+  FolderOpen, FileText, Target, Shield, Search, X, Printer, Eye, CalendarDays, Wallet, FileBarChart, Upload, Paperclip, Trash2
 } from 'lucide-react';
-import { Card, Avatar, btnPrimary, btnSecondary, btnGhost, inputCls } from './UI';
+import { Card, Avatar, btnPrimary, btnSecondary, btnGhost, inputCls, CoolSelect } from './UI';
 import { calcGoal, fmtINR, fmtFull, fmtSip, goalEmoji, monthLabel, fmtDate } from '../utils/calc';
 import { hasAllocation, allocationTotals, filledItems } from '../utils/assets';
-import { updateClient } from '../services/db';
+import { updateClient, deleteMom } from '../services/db';
+import { getCurrentUser } from '../utils/auth';
+import { printHtmlDocument, printSafeDataUrl, wrapStandaloneHtml } from '../utils/documents';
+import { buildMomHtml } from '../utils/momHtml';
 
 // ---------------------------------------------------------------------------
 // Build a unified, DB-driven list of generated documents from the clients data.
@@ -37,10 +41,23 @@ export default function DocumentsView({ clients = [] }) {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   // Upload Form State
-  const [selectedClientId, setSelectedClientId] = useState('');
+  const [selectedGroupLeaderId, setSelectedGroupLeaderId] = useState('');
+  const [selectedApplicant, setSelectedApplicant] = useState('');
   const [docTitle, setDocTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedFileDataUrl, setSelectedFileDataUrl] = useState('');
+
+  // Applicant options derived from the selected group leader's family
+  const uploadApplicantOptions = useMemo(() => {
+    if (!selectedGroupLeaderId) return [];
+    const gl = clients.find(c => c.id === selectedGroupLeaderId);
+    if (!gl) return [];
+    const opts = [{ name: gl.name, relation: 'Self' }];
+    (gl.clientDetails?.familyDetails || []).forEach(f => {
+      if (f.name) opts.push({ name: f.name, relation: f.relation || 'Member' });
+    });
+    return opts;
+  }, [clients, selectedGroupLeaderId]);
 
   const documents = useMemo(() => {
     const docs = [];
@@ -185,31 +202,43 @@ export default function DocumentsView({ clients = [] }) {
 
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedClientId || !docTitle || !selectedFileDataUrl) {
-      alert("Please select a client, provide a title, and select a file.");
+    const finalDocTitle = docTitle.trim();
+    if (!selectedGroupLeaderId || !selectedApplicant || !finalDocTitle || !selectedFileDataUrl) {
+      alert("Please fill all fields and select a file.");
       return;
     }
 
     try {
-      const targetClient = clients.find(c => c.id === selectedClientId);
+      const targetClient = clients.find(c => c.id === selectedGroupLeaderId);
       if (!targetClient) return;
 
       const details = targetClient.clientDetails || {};
       const currentAttachments = details.attachments || [];
 
+      // Auto-number duplicate doc types for the same applicant — only adds (n) when n > 1
+      const sameCount = currentAttachments.filter(a =>
+        a.category?.toLowerCase() === finalDocTitle.toLowerCase() &&
+        a.applicantName === selectedApplicant
+      ).length;
+      const n = sameCount + 1;
+      const docName = n > 1 ? `${finalDocTitle} (${n})_${selectedApplicant}` : `${finalDocTitle}_${selectedApplicant}`;
+
       const newAttachment = {
         id: 'custom-' + Date.now(),
-        name: docTitle,
+        name: docName,
         fileName: selectedFile.name,
         fileType: selectedFile.type,
         dataUrl: selectedFileDataUrl,
         date: new Date().toISOString(),
-        uploadedBy: 'Nitesh Luthra',
+        uploadedBy: getCurrentUser()?.name || 'System',
+        category: finalDocTitle,
+        applicantName: selectedApplicant,
+        docNumber: n,
       };
 
       const updated = [newAttachment, ...currentAttachments];
 
-      await updateClient(selectedClientId, {
+      await updateClient(selectedGroupLeaderId, {
         clientDetails: {
           ...details,
           attachments: updated
@@ -221,13 +250,52 @@ export default function DocumentsView({ clients = [] }) {
       }
 
       setIsUploadModalOpen(false);
-      setSelectedClientId('');
+      setSelectedGroupLeaderId('');
+      setSelectedApplicant('');
       setDocTitle('');
       setSelectedFile(null);
       setSelectedFileDataUrl('');
       alert("Document uploaded successfully!");
     } catch (err) {
       alert("Error uploading document: " + err.message);
+    }
+  };
+
+  const handleDeleteDoc = async (e, doc) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!window.confirm(`Are you sure you want to delete "${doc.title}"?`)) return;
+
+    try {
+      if (doc.type === 'custom') {
+        const client = doc.client;
+        const details = client.clientDetails || {};
+        const attachments = details.attachments || [];
+        const filtered = attachments.filter((item) => {
+          if (typeof item === 'string') {
+            return item !== doc.title;
+          }
+          return item.id !== doc.id && (item.fileName !== doc.attachment?.fileName || item.name !== doc.title);
+        });
+
+        await updateClient(client.id, {
+          clientDetails: {
+            ...details,
+            attachments: filtered
+          }
+        });
+      } else if (doc.type === 'mom') {
+        await deleteMom(doc.client.id, doc.mom.id);
+      } else {
+        return;
+      }
+
+      if (window.refreshAppData) {
+        await window.refreshAppData();
+      }
+      alert("Document deleted successfully!");
+    } catch (err) {
+      alert("Error deleting document: " + err.message);
     }
   };
 
@@ -315,15 +383,26 @@ export default function DocumentsView({ clients = [] }) {
                 <h3 className="mt-3.5 text-sm font-bold text-slate-900 dark:text-white leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{doc.title}</h3>
                 <div className="mt-3 flex items-center gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
                   <Avatar name={doc.client.name} size="sm" />
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{doc.client.name}</div>
                     <div className="text-[10px] text-slate-450 dark:text-slate-500 flex items-center gap-1">
                       <CalendarDays size={10} /> {doc.date ? fmtDate(doc.date) : 'Generated'}
                     </div>
                   </div>
-                  <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Eye size={12} /> View
-                  </span>
+                  <div className="ml-auto flex items-center gap-2 shrink-0">
+                    {(doc.type === 'custom' || doc.type === 'mom') && (
+                      <button
+                        onClick={(e) => handleDeleteDoc(e, doc)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-455 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-xl transition-all cursor-pointer opacity-0 group-hover:opacity-100 shrink-0"
+                        title="Delete Document"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Eye size={12} /> View
+                    </span>
+                  </div>
                 </div>
               </button>
             );
@@ -332,69 +411,163 @@ export default function DocumentsView({ clients = [] }) {
       )}
 
       {/* Upload Document Modal */}
-      {isUploadModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setIsUploadModalOpen(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md shadow-2xl border border-slate-200/50 dark:border-slate-800/80 p-6 animate-scale-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+      {isUploadModalOpen && createPortal(
+        <div className="fixed inset-0 bg-slate-50 dark:bg-slate-950 z-50 flex items-center justify-center p-0 md:p-6 overflow-hidden animate-fade-in" onClick={() => setIsUploadModalOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-none md:rounded-2xl w-full max-w-md shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up flex flex-col h-full md:h-auto max-h-screen" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 flex items-center justify-center">
                   <Upload size={16} />
                 </span>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">Upload New Document</h3>
               </div>
-              <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-slate-650 dark:hover:text-slate-300 transition-colors">
+              <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-slate-650 dark:hover:text-slate-300 transition-colors cursor-pointer">
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleUploadSubmit} className="mt-4 space-y-4">
+            <form onSubmit={handleUploadSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+
+              {/* Step 1 — Group Leader */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">Select Client</label>
-                <select
+                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-white text-[8px] font-black mr-1">1</span>
+                  Group Leader
+                </label>
+                <CoolSelect
                   required
-                  value={selectedClientId}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  value={selectedGroupLeaderId}
+                  onChange={(e) => { setSelectedGroupLeaderId(e.target.value); setSelectedApplicant(''); }}
                   className={inputCls + ' text-xs'}
                 >
-                  <option value="">-- Choose a Client --</option>
+                  <option value="">-- Select Group Leader --</option>
                   {clients.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.pan})</option>
+                    <option key={c.id} value={c.id}>{c.name}{c.pan ? ` (${c.pan})` : ''}</option>
                   ))}
-                </select>
+                </CoolSelect>
               </div>
 
+              {/* Step 2 — Applicant */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">Document Title</label>
-                <input
-                  type="text"
+                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-white text-[8px] font-black mr-1">2</span>
+                  Applicant / Family Member
+                </label>
+                <CoolSelect
                   required
-                  placeholder="e.g. Identity Proof, Signed Consent Form"
+                  value={selectedApplicant}
+                  onChange={(e) => setSelectedApplicant(e.target.value)}
+                  className={inputCls + ' text-xs'}
+                  disabled={!selectedGroupLeaderId}
+                >
+                  <option value="">{selectedGroupLeaderId ? '-- Select Applicant --' : '-- Select Group Leader first --'}</option>
+                  {uploadApplicantOptions.map(a => (
+                    <option key={a.name} value={a.name}>{a.name} ({a.relation})</option>
+                  ))}
+                </CoolSelect>
+              </div>
+
+              {/* Step 3 — Document Type */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-white text-[8px] font-black mr-1">3</span>
+                  Document Title
+                </label>
+                <CoolSelect
+                  required
+                  freeInput
                   value={docTitle}
                   onChange={(e) => setDocTitle(e.target.value)}
+                  placeholder="Select or type document title…"
                   className={inputCls + ' text-xs'}
-                />
+                  disabled={!selectedApplicant}
+                >
+                  <option value="">-- Select Document Type --</option>
+                  <optgroup label="Identity Proof">
+                    <option>Aadhaar Card</option>
+                    <option>PAN Card</option>
+                    <option>Passport</option>
+                    <option>Voter ID</option>
+                    <option>Driving License</option>
+                    <option>Birth Certificate</option>
+                  </optgroup>
+                  <optgroup label="Address Proof">
+                    <option>Utility Bill</option>
+                    <option>Rent Agreement</option>
+                    <option>Ration Card</option>
+                  </optgroup>
+                  <optgroup label="Financial">
+                    <option>Cancelled Cheque</option>
+                    <option>Bank Statement (3 Months)</option>
+                    <option>Bank Statement (6 Months)</option>
+                    <option>Bank Statement (12 Months)</option>
+                    <option>ITR (1 Year)</option>
+                    <option>ITR (3 Years)</option>
+                    <option>Computation (3 Years)</option>
+                    <option>Form 16</option>
+                    <option>CA Certificate</option>
+                  </optgroup>
+                  <optgroup label="Employment">
+                    <option>Salary Slip (Last 3 Months)</option>
+                    <option>Employment Letter</option>
+                    <option>Appointment Letter</option>
+                  </optgroup>
+                  <optgroup label="Medical">
+                    <option>Medical Report</option>
+                    <option>First Prescription</option>
+                    <option>ECG Report</option>
+                    <option>Blood Report</option>
+                    <option>X-Ray Report</option>
+                  </optgroup>
+                  <optgroup label="Insurance">
+                    <option>Passport Size Photo</option>
+                    <option>Policy Document</option>
+                    <option>Proposal Form</option>
+                    <option>Previous Policy</option>
+                    <option>Surrender Letter</option>
+                  </optgroup>
+                  <optgroup label="Other">
+                    <option>Other</option>
+                  </optgroup>
+                </CoolSelect>
               </div>
 
+              {/* Step 4 — File */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">Choose File</label>
+                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-white text-[8px] font-black mr-1">4</span>
+                  Choose File
+                </label>
                 <div className="relative border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center hover:border-blue-400 transition-colors cursor-pointer group">
                   <input
                     type="file"
                     required
                     onChange={handleFileChange}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   />
                   <Paperclip size={24} className="mx-auto text-slate-400 group-hover:text-blue-500 transition-colors mb-2" />
                   <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
                     {selectedFile ? selectedFile.name : 'Click to select or drag file here'}
                   </span>
                   <span className="text-[10px] text-slate-400 dark:text-slate-500 block mt-1">
-                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : 'Image or PDF (Max 5MB)'}
+                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : 'Any file format · Max 5MB'}
                   </span>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-2">
+              {/* Preview of final doc name */}
+              {selectedGroupLeaderId && selectedApplicant && docTitle && (
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200/60 dark:border-slate-800/60 px-4 py-3">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Will be saved as</p>
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {docTitle || '…'}
+                    <span className="text-slate-400 mx-1">·</span>
+                    <span className="text-blue-600 dark:text-blue-400">{selectedApplicant}</span>
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 shrink-0">
                 <button type="button" onClick={() => setIsUploadModalOpen(false)} className={btnGhost + ' py-2 px-4'}>
                   Cancel
                 </button>
@@ -404,7 +577,8 @@ export default function DocumentsView({ clients = [] }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {preview && <DocPreviewModal doc={preview} onClose={() => setPreview(null)} />}
@@ -418,24 +592,46 @@ export default function DocumentsView({ clients = [] }) {
 function DocPreviewModal({ doc, onClose }) {
   const meta = TYPE_META[doc.type];
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-50 dark:bg-slate-950 z-50 flex items-center justify-center p-0 md:p-6 overflow-hidden animate-fade-in" onClick={onClose}>
       <style dangerouslySetInnerHTML={{ __html: DOC_PRINT_STYLES }} />
-      <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-3xl shadow-2xl my-8 border border-slate-200/50 dark:border-slate-800/80 animate-scale-up" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-900 rounded-none md:rounded-2xl w-full max-w-3xl shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up flex flex-col h-full md:h-[90vh] max-h-screen" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="no-print flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+        <div className="no-print flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <span className={`w-9 h-9 rounded-xl bg-gradient-to-br ${meta.chip} text-white flex items-center justify-center shrink-0`}>
               <meta.icon size={17} />
             </span>
             <div className="min-w-0">
               <h3 className="text-base font-bold text-slate-900 dark:text-white truncate">{doc.title}</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{doc.client.name}{doc.date ? ` · ${fmtDate(doc.date)}` : ''}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{doc.client.name}{doc.date ? ` · ${fmtDate(doc.date)}` : ''}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => window.print()} className={btnSecondary + ' py-2 px-3'}>
-              <Printer size={14} /> Print
+            {/* A 'custom' doc's HTML renders inside a fixed-height, scrolling
+                <iframe> (see CustomDocPreview) — printing the PARENT window
+                only captures whatever ~500px happens to be visible in that
+                box, cutting off the rest of anything longer. Every other doc
+                type here is plain DOM content (no iframe), where the normal
+                window.print() + DOC_PRINT_STYLES approach already works fine. */}
+            <button
+              onClick={() => {
+                const isCustomHtml = doc.type === 'custom' && doc.attachment?.fileType === 'text/html' && doc.attachment?.html;
+                if (isCustomHtml) {
+                  printHtmlDocument(doc.attachment.html);
+                } else if (doc.type === 'mom' && doc.mom) {
+                  // Same polished, letterhead-branded rendering + print-safe
+                  // CSS as a saved MOM document — not the plain MomDoc table
+                  // below (that used window.print() on the live DOM, with no
+                  // page-margin/color-adjust/page-break handling at all).
+                  printHtmlDocument(wrapStandaloneHtml(buildMomHtml(doc.mom, doc.client), `Minutes of Meeting — ${doc.client.name}`));
+                } else {
+                  window.print();
+                }
+              }}
+              className={btnSecondary + ' py-2 px-3'}
+            >
+              <Printer size={14} /> Print / Save as PDF
             </button>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
               <X size={18} />
@@ -444,26 +640,29 @@ function DocPreviewModal({ doc, onClose }) {
         </div>
 
         {/* Document body */}
-        <div className="doc-print-body p-6 max-h-[72vh] overflow-y-auto">
+        <div className="doc-print-body p-6 overflow-y-auto flex-1">
           <div className="doc-letterhead hidden print:block mb-5">
             <div className="text-lg font-bold text-slate-900">Team Fintness</div>
             <div className="text-[11px] uppercase tracking-wider text-slate-500">{meta.label}</div>
           </div>
           {doc.type === 'custom' && <CustomDocPreview doc={doc} />}
-          {doc.type === 'mom' && <MomDoc mom={doc.mom} client={doc.client} />}
+          {doc.type === 'mom' && (
+            <div className="max-w-[800px] mx-auto" dangerouslySetInnerHTML={{ __html: buildMomHtml(doc.mom, doc.client) }} />
+          )}
           {doc.type === 'goal' && <GoalDoc goals={doc.goals} client={doc.client} />}
           {doc.type === 'asset' && <AssetDoc assetAllocation={doc.assetAllocation} client={doc.client} />}
           {doc.type === 'policy' && <PolicyDoc client={doc.client} />}
           {doc.type === 'portfolio' && <PortfolioDoc goals={doc.goals} assetAllocation={doc.assetAllocation} client={doc.client} />}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 function CustomDocPreview({ doc }) {
   const file = doc.attachment;
-  if (!file || (!file.dataUrl && !file.data)) {
+  if (!file || (!file.dataUrl && !file.data && !file.html)) {
     return (
       <div className="text-center py-12 space-y-4">
         <FolderOpen size={48} className="mx-auto text-slate-400 dark:text-slate-650" />
@@ -475,9 +674,14 @@ function CustomDocPreview({ doc }) {
     );
   }
 
-  const dataUrl = file.dataUrl || file.data;
   const isImage = file.fileType?.startsWith('image/');
   const isPdf = file.fileType === 'application/pdf';
+  const isHtml = file.fileType === 'text/html' && !!file.html;
+  // For HTML docs, rebuild the data URL from the patched (print-safe) HTML
+  // rather than file.dataUrl — that field was captured at save time and
+  // carries the same stale-CSS gap as file.html, so a downloaded copy would
+  // still print washed-out even after the in-app Print button was fixed.
+  const dataUrl = isHtml ? printSafeDataUrl(file.html) : (file.dataUrl || file.data);
 
   return (
     <div className="space-y-6">
@@ -489,22 +693,29 @@ function CustomDocPreview({ doc }) {
           </div>
           <div>
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{file.name || file.fileName}</h4>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Uploaded by {file.uploadedBy || 'Nitesh Luthra'} {file.date ? `· ${new Date(file.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Uploaded by {file.uploadedBy || 'System'} {file.date ? `· ${new Date(file.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</p>
           </div>
         </div>
-        <a 
-          href={dataUrl} 
-          download={file.fileName}
-          className={btnPrimary + ' py-2 px-3.5 text-[11px]'}
-        >
-          Download File
-        </a>
+        <div className="flex items-center gap-2">
+          {/* Print lives only on the modal's outer header button now — this
+              inner one duplicated it right next to Download, which read as
+              two separate, confusing print controls for the same document. */}
+          <a
+            href={dataUrl}
+            download={file.fileName}
+            className={btnPrimary + ' py-2 px-3.5 text-[11px]'}
+          >
+            Download File
+          </a>
+        </div>
       </div>
 
       {/* Preview container */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-950 flex items-center justify-center min-h-[300px] max-h-[500px]">
         {isImage ? (
           <img src={dataUrl} alt={file.name} className="max-w-full max-h-[500px] object-contain shadow-sm" />
+        ) : isHtml ? (
+          <iframe srcDoc={file.html} title={file.name} className="w-full h-[500px] border-0 bg-white" />
         ) : isPdf ? (
           <iframe src={dataUrl} title={file.name} className="w-full h-[500px] border-0" />
         ) : (
@@ -537,69 +748,6 @@ function KVRow({ label, value }) {
     <div className="flex justify-between gap-4 py-1.5 border-b border-slate-100 dark:border-slate-800/60 text-sm">
       <span className="text-slate-500 dark:text-slate-400">{label}</span>
       <span className="font-semibold text-slate-800 dark:text-slate-200 text-right">{value}</span>
-    </div>
-  );
-}
-
-function BulletList({ items }) {
-  const list = (items || []).filter(Boolean);
-  if (list.length === 0) return <p className="text-sm text-slate-400 dark:text-slate-500 italic">None recorded.</p>;
-  return (
-    <ul className="space-y-1.5">
-      {list.map((it, i) => (
-        <li key={i} className="flex gap-2 text-sm text-slate-700 dark:text-slate-300">
-          <span className="text-blue-500 mt-0.5">•</span>
-          <span>{typeof it === 'string' ? it : JSON.stringify(it)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-// --- Minutes of Meeting document ------------------------------------------
-function MomDoc({ mom, client }) {
-  const d = mom.data || {};
-  return (
-    <div>
-      <DocSection title="Meeting Details">
-        <KVRow label="Client" value={client.name} />
-        <KVRow label="Meeting Number" value={mom.meetingNumber} />
-        <KVRow label="Meeting Date" value={mom.meetingDate ? fmtDate(mom.meetingDate) : '—'} />
-        <KVRow label="Advisor" value={d.advisorName} />
-        <KVRow label="Mode" value={d.meetingMode} />
-      </DocSection>
-
-      {(d.occupation || d.income || d.expenses || d.maritalStatus) && (
-        <DocSection title="Client Snapshot">
-          <KVRow label="Occupation" value={d.occupation} />
-          <KVRow label="Monthly Income" value={d.income} />
-          <KVRow label="Monthly Expenses" value={d.expenses} />
-          <KVRow label="Marital Status" value={d.maritalStatus} />
-          <KVRow label="Spouse" value={d.spouseName} />
-        </DocSection>
-      )}
-
-      {Array.isArray(d.goals) && d.goals.length > 0 && (
-        <DocSection title="Goals Discussed">
-          {d.goals.map((g, i) => (
-            <KVRow key={i} label={g.name} value={`Target ${fmtINR(g.target)} · Accumulated ${fmtINR(g.accumulated)}`} />
-          ))}
-        </DocSection>
-      )}
-
-      <DocSection title="Agenda"><BulletList items={d.agenda} /></DocSection>
-      <DocSection title="Discussion Points"><BulletList items={d.discussion} /></DocSection>
-      <DocSection title="Our Recommendations"><BulletList items={d.ourRecs} /></DocSection>
-      <DocSection title="Client Recommendations / Asks"><BulletList items={d.clientRecs} /></DocSection>
-
-      {d.followupRequired && (
-        <DocSection title="Follow-up">
-          <KVRow label="Required" value={d.followupRequired} />
-          <KVRow label="Date" value={d.followupDate ? fmtDate(d.followupDate) : ''} />
-          <KVRow label="Purpose" value={d.followupPurpose} />
-          <KVRow label="Notes" value={d.followupNotes} />
-        </DocSection>
-      )}
     </div>
   );
 }
@@ -809,7 +957,7 @@ function PortfolioDoc({ goals, assetAllocation, client }) {
                     </td>
                     <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400">{g.targetYear}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtINR(c.futureValue)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtSip(g.currentSip)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtSip(c.todayEffectiveSip)}</td>
                     <td className="px-3 py-2.5 text-center font-bold text-emerald-600 dark:text-emerald-400">
                       {c.achievementPct.toFixed(1)}%
                     </td>

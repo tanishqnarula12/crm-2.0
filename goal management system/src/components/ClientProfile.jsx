@@ -1,23 +1,40 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   User, Phone, Mail, MapPin, Pencil, CheckCircle2, XCircle, Lock,
   Contact, UsersRound, Users, Briefcase,
   Activity, Archive, CalendarDays, TrendingUp, Paperclip, FileText, Skull, Clock,
-  ListChecks, Plus, Trash2, Check, X, MessageSquare, Send, Wallet, FileBarChart, Printer, Eye, Target, Shield, Upload, FolderOpen
+  ListChecks, Plus, Trash2, Check, X, MessageSquare, Send, Wallet, FileBarChart, Printer, Eye, Target, Shield, Upload, FolderOpen,
+  Video, Globe, Building, ArrowLeftRight, ChevronRight
 } from 'lucide-react';
-import { Avatar, Card, btnPrimary, btnSecondary, btnGhost, inputCls } from './UI';
-import { FIXED_ROLES, MANAGER_ROLES } from '../utils/team';
-import { loadTasks } from '../utils/tasks';
-import { loadProspects, CATEGORY_THEME, PROSPECT_STAGE_THEME, fmtAmountINR } from '../utils/prospects';
-import { updateClient } from '../services/db';
+import { Avatar, Card, btnPrimary, btnSecondary, btnGhost, inputCls, CoolSelect } from './UI';
+import { MANAGER_ROLES } from '../utils/team';
+import { teamName } from '../services/team';
+import { getCurrentUser } from '../utils/auth';
+import { canEditClient, canDeleteClient } from '../utils/permissions';
+import { loadTasks, fetchClosedTasksForClient } from '../utils/tasks';
+import { loadProspects, CATEGORY_THEME, ALL_STAGE_THEME, fmtAmountINR } from '../utils/prospects';
+import { loadMeetings, MEETING_STATUS_THEME, MODE_THEME, fmtMeetingWhen, meetingDateTime } from '../utils/meetings';
+import { updateClient, deleteMom } from '../services/db';
+import ClientActivityLog from './ClientActivityLog';
 import { uid, calcGoal, fmtINR, fmtFull, fmtSip, goalEmoji, monthLabel, fmtDate } from '../utils/calc';
 import { hasAllocation, allocationTotals, filledItems } from '../utils/assets';
+import { cobrTotals } from '../utils/cobr';
+import { printHtmlDocument, printSafeDataUrl, wrapStandaloneHtml } from '../utils/documents';
+import { buildMomHtml } from '../utils/momHtml';
 
 export default function ClientProfileView({
-  client, clients = [], onEditClient, isViewer,
-  onNavigateToTasks, onOpenTask, tasksChangeCounter,
+  client, clients = [], onEditClient, onDeleteClient, isViewer,
+  onNavigateToTasks, onOpenTask, tasksChangeCounter, onOpenCobr,
   onNavigateToProspects, onOpenProspect, prospectsChangeCounter,
+  onScheduleMeeting, onOpenMeeting, meetingsChangeCounter, onNavigateToMeetings,
+  highlightApplicant,
 }) {
+  // RBAC: personal-details edit is Operations-Manager/Admin only; delete is
+  // Admin only (soft). Server enforces the same rules.
+  const me = getCurrentUser();
+  const mayEditClient = !isViewer && canEditClient(me);
+  const mayDeleteClient = canDeleteClient(me);
   const details = client.clientDetails || {};
   const {
     mobile = '',
@@ -32,7 +49,14 @@ export default function ClientProfileView({
     pinCode = '',
     profession = '',
     professionOther = '',
+    maritalStatus = '',
     familyDetails = [],
+    income = '',
+    occupation = '',
+    placeOfBirth = '',
+    mothersName = '',
+    nomineeName = '',
+    nomineeRelation = '',
     mutualFunds = 'No',
     insuranceTerm = 'No',
     insuranceMedical = 'No',
@@ -41,26 +65,77 @@ export default function ClientProfileView({
 
   const [tasks, setTasks] = React.useState(() => loadTasks());
   const [prospects, setProspects] = React.useState(() => loadProspects());
+  const [meetings, setMeetings] = React.useState(() => loadMeetings());
   const [previewDoc, setPreviewDoc] = React.useState(null);
 
   // Upload States
   const [isUploadModalOpen, setIsUploadModalOpen] = React.useState(false);
+  const [uploadApplicant, setUploadApplicant] = React.useState('');
   const [docTitle, setDocTitle] = React.useState('');
   const [selectedFile, setSelectedFile] = React.useState(null);
   const [selectedFileDataUrl, setSelectedFileDataUrl] = React.useState('');
-  
+
+  // Edit Doc States
+  const [editingDoc, setEditingDoc] = React.useState(null);
+  const [editDocTitle, setEditDocTitle] = React.useState('');
+  const [editDocApplicant, setEditDocApplicant] = React.useState('');
+
   // Filter State
   const [attachmentFilter, setAttachmentFilter] = React.useState('custom');
+
+  // Applicant view modal — opened by clicking a row in the "Family &
+  // Applicants Details" table. Read-only: shows every field for that
+  // applicant (Self or a family member). Editing happens in the Edit Client
+  // Details form, not here. Holds the clicked applicant row or null when closed.
+  const [viewApplicant, setViewApplicant] = React.useState(null);
+
+  // Deep-link from the client search dropdown's "Applicants" results — scroll
+  // to and briefly flash the matching row in the Family & Applicants Details
+  // table below (mirrors the chat message jump-to-and-flash behavior).
+  const [flashApplicant, setFlashApplicant] = React.useState(null);
+  React.useEffect(() => {
+    if (!highlightApplicant) return;
+    const key = highlightApplicant.pan || highlightApplicant.name;
+    if (!key) return;
+    const id = `applicant-row-${key}`;
+    let cancelled = false;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFlashApplicant(key);
+        setTimeout(() => setFlashApplicant(null), 1800);
+      } else if (attempts++ < 10) {
+        setTimeout(tryScroll, 100);
+      }
+    };
+    tryScroll();
+    return () => { cancelled = true; };
+  }, [highlightApplicant]);
 
   // Sync tasks when client or counter changes
   React.useEffect(() => {
     setTasks(loadTasks());
   }, [client, tasksChangeCounter]);
 
-  // Sync prospects when client or counter changes
+  // Sync prospects when client or counter changes, and also when any proposal
+  // page creates a new prospect (which fires 'crm:prospects-updated' but never
+  // touches prospectsChangeCounter — that counter is edit-only).
   React.useEffect(() => {
     setProspects(loadProspects());
   }, [client, prospectsChangeCounter]);
+  React.useEffect(() => {
+    const sync = () => setProspects(loadProspects());
+    window.addEventListener('crm:prospects-updated', sync);
+    return () => window.removeEventListener('crm:prospects-updated', sync);
+  }, []);
+
+  // Sync meetings when client or counter changes
+  React.useEffect(() => {
+    setMeetings(loadMeetings());
+  }, [client, meetingsChangeCounter]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -72,10 +147,6 @@ export default function ClientProfileView({
     }
 
     setSelectedFile(file);
-    if (!docTitle) {
-      const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-      setDocTitle(nameWithoutExt);
-    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -86,44 +157,111 @@ export default function ClientProfileView({
 
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
-    if (!docTitle || !selectedFileDataUrl) {
-      alert("Please provide a title and select a file.");
+    const finalTitle = docTitle.trim();
+    const finalApplicant = uploadApplicant.trim() || client.name;
+    if (!finalTitle || !selectedFileDataUrl) {
+      alert("Please select a document type and a file.");
       return;
     }
 
     try {
       const currentAttachments = details.attachments || [];
+      const sameCount = currentAttachments.filter(a =>
+        a.category?.toLowerCase() === finalTitle.toLowerCase() &&
+        a.applicantName === finalApplicant
+      ).length;
+      const n = sameCount + 1;
+      const docName = n > 1 ? `${finalTitle} (${n})_${finalApplicant}` : `${finalTitle}_${finalApplicant}`;
 
       const newAttachment = {
         id: 'custom-' + Date.now(),
-        name: docTitle,
+        name: docName,
+        category: finalTitle,
+        applicantName: finalApplicant,
+        docNumber: n,
         fileName: selectedFile.name,
         fileType: selectedFile.type,
         dataUrl: selectedFileDataUrl,
         date: new Date().toISOString(),
-        uploadedBy: 'Nitesh Luthra',
+        uploadedBy: getCurrentUser()?.name || 'System',
       };
 
       const updated = [newAttachment, ...currentAttachments];
 
       await updateClient(client.id, {
-        clientDetails: {
-          ...details,
-          attachments: updated
-        }
+        clientDetails: { ...details, attachments: updated }
       });
+
+      if (window.refreshAppData) await window.refreshAppData();
+
+      setIsUploadModalOpen(false);
+      setDocTitle('');
+      setUploadApplicant('');
+      setSelectedFile(null);
+      setSelectedFileDataUrl('');
+    } catch (err) {
+      alert("Error uploading document: " + err.message);
+    }
+  };
+
+  const handleEditDocSubmit = async (e) => {
+    e.preventDefault();
+    const newTitle = editDocTitle.trim();
+    const newApplicant = editDocApplicant.trim();
+    if (!newTitle) { alert("Title cannot be empty."); return; }
+
+    try {
+      const currentAttachments = details.attachments || [];
+      const updated = currentAttachments.map(item => {
+        if (!item || typeof item !== 'object') return item;
+        if (item.id !== editingDoc.id) return item;
+        return { ...item, name: `${newTitle}_${newApplicant}`, category: newTitle, applicantName: newApplicant };
+      });
+
+      await updateClient(client.id, {
+        clientDetails: { ...details, attachments: updated }
+      });
+
+      if (window.refreshAppData) await window.refreshAppData();
+      setEditingDoc(null);
+    } catch (err) {
+      alert("Error updating document: " + err.message);
+    }
+  };
+
+  const handleDeleteDoc = async (e, doc) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!window.confirm(`Are you sure you want to delete "${doc.title}"?`)) return;
+
+    try {
+      if (doc.type === 'custom') {
+        const currentAttachments = details.attachments || [];
+        const filtered = currentAttachments.filter((item) => {
+          if (typeof item === 'string') {
+            return item !== doc.title;
+          }
+          return item.id !== doc.id && (item.fileName !== doc.attachment?.fileName || item.name !== doc.title);
+        });
+
+        await updateClient(client.id, {
+          clientDetails: {
+            ...details,
+            attachments: filtered
+          }
+        });
+      } else if (doc.type === 'mom') {
+        await deleteMom(client.id, doc.mom.id);
+      } else {
+        return;
+      }
 
       if (window.refreshAppData) {
         await window.refreshAppData();
       }
-
-      setIsUploadModalOpen(false);
-      setDocTitle('');
-      setSelectedFile(null);
-      setSelectedFileDataUrl('');
-      alert("Document uploaded successfully!");
+      alert("Document deleted successfully!");
     } catch (err) {
-      alert("Error uploading document: " + err.message);
+      alert("Error deleting document: " + err.message);
     }
   };
 
@@ -225,7 +363,10 @@ export default function ClientProfileView({
   // The client themselves is always the "Self" applicant, shown first, followed
   // by family members (any duplicate "Self" entry in the saved list is dropped).
   const applicantRows = [
-    { name: client.name, relation: 'Self', pan: client.pan, dob },
+    {
+      name: client.name, relation: 'Self', pan: client.pan, dob, mobile, email,
+      income, occupation, placeOfBirth, mothersName, nomineeName, nomineeRelation,
+    },
     ...familyDetails.filter(f => (f.relation || '').toLowerCase() !== 'self'),
   ];
 
@@ -244,10 +385,36 @@ export default function ClientProfileView({
     );
   }, [client, tasks]);
 
+  // Closed tasks for this client that the current user isn't a participant on
+  // — once a task is CLOSED it becomes visible to the whole team in the client
+  // profile (open/in-progress ones stay confidential, so they're not fetched
+  // here — those only ever come from the RBAC-filtered `tasks` cache).
+  const [extraClosedTasks, setExtraClosedTasks] = React.useState([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchClosedTasksForClient(client.id).then((list) => { if (!cancelled) setExtraClosedTasks(list); });
+    return () => { cancelled = true; };
+  }, [client.id, tasksChangeCounter]);
+
   const closedTasks = React.useMemo(() => {
-    return tasks.filter(t =>
+    const localClosed = tasks.filter(t =>
       (t.groupLeaderId === client.id || t.groupLeader === client.name) &&
       (t.stage === 'Completed' || t.stage === 'Lost')
+    );
+    // Merge the team-visible closed tasks in, de-duplicated by id (a task the
+    // user IS a participant on appears in both — keep one copy).
+    const byId = new Map(localClosed.map(t => [t.id, t]));
+    for (const t of extraClosedTasks) if (!byId.has(t.id)) byId.set(t.id, t);
+    return [...byId.values()];
+  }, [client, tasks, extraClosedTasks]);
+
+  // COBR (Change of Broker) requests for this client — same Task rows already
+  // counted above in Open/Closed Activities, surfaced again here with the
+  // richer per-scheme checklist totals.
+  const clientCobrTasks = React.useMemo(() => {
+    return tasks.filter(t =>
+      t.relatedTo === 'COBR' &&
+      (t.groupLeaderId === client.id || t.groupLeader === client.name)
     );
   }, [client, tasks]);
 
@@ -259,6 +426,25 @@ export default function ClientProfileView({
       (client.pan && p.pan === client.pan)
     );
   }, [client, prospects]);
+
+  // Meetings for this client — split into upcoming (still Scheduled) and
+  // history (Completed/Cancelled). Upcoming surfaces in Open Activities,
+  // history surfaces in Meeting Setup History.
+  const clientMeetings = React.useMemo(() => {
+    return meetings.filter(m => m.clientId === client.id || m.clientName === client.name);
+  }, [client, meetings]);
+
+  const upcomingMeetings = React.useMemo(() => {
+    return clientMeetings
+      .filter(m => (m.status || 'Scheduled') === 'Scheduled')
+      .sort((a, b) => (meetingDateTime(a)?.getTime() || 0) - (meetingDateTime(b)?.getTime() || 0));
+  }, [clientMeetings]);
+
+  const pastMeetings = React.useMemo(() => {
+    return clientMeetings
+      .filter(m => m.status === 'Completed' || m.status === 'Cancelled')
+      .sort((a, b) => (meetingDateTime(b)?.getTime() || 0) - (meetingDateTime(a)?.getTime() || 0));
+  }, [clientMeetings]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -284,10 +470,24 @@ export default function ClientProfileView({
               </p>
             </div>
           </div>
-          {!isViewer && (
-            <button onClick={onEditClient} className={btnPrimary + ' w-full md:w-auto'}>
-              <Pencil size={14} /> Edit Client Details
-            </button>
+          {(mayEditClient || mayDeleteClient) && (
+            <div className="flex flex-wrap gap-2 w-full md:w-auto">
+              {mayEditClient && (
+                <button onClick={onEditClient} className={btnPrimary + ' flex-1 md:flex-initial'}>
+                  <Pencil size={14} /> Edit Client Details
+                </button>
+              )}
+              {mayDeleteClient && onDeleteClient && (
+                <button
+                  type="button"
+                  onClick={onDeleteClient}
+                  className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-955/20 dark:hover:bg-rose-955/45 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 flex items-center justify-center gap-1.5 transition-all cursor-pointer flex-1 md:flex-initial"
+                  title="Delete Client"
+                >
+                  <Trash2 size={14} /> Delete Client
+                </button>
+              )}
+            </div>
           )}
         </div>
       </Card>
@@ -314,6 +514,7 @@ export default function ClientProfileView({
               <ContactRow icon={Mail} accent="sky" label="Email" value={email} />
               <ContactRow icon={User} accent="blue" label="Client Type" value={clientType} emptyText="Not configured" />
               <ContactRow icon={Briefcase} accent="blue" label="Profession" value={profession === 'Other' ? (professionOther || 'Other') : profession} emptyText="Not configured" />
+              <ContactRow icon={UsersRound} accent="blue" label="Marital Status" value={maritalStatus} emptyText="Not configured" />
               <ContactRow icon={MapPin} accent="cyan" label="Address" value={formattedAddress} multiline emptyText="No address details configured" />
             </div>
           </SectionBox>
@@ -321,12 +522,12 @@ export default function ClientProfileView({
           {/* Box 2: Internal Assignment Details */}
           <SectionBox accent="blue" icon={UsersRound} title="Internal Team Assignments">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <RoleTile label="Owner" name={FIXED_ROLES.owner} fixed />
+              <RoleTile label="Owner" name={teamName(details.owner)} />
               {MANAGER_ROLES.map(role => (
-                <RoleTile key={role.key} label={role.label} name={details[role.key]} />
+                <RoleTile key={role.key} label={role.label} name={teamName(details[role.key])} />
               ))}
-              <RoleTile label="Operation Manager" name={FIXED_ROLES.operationManager} fixed />
-              <RoleTile label="Internal Manager" name={FIXED_ROLES.internalManager} fixed />
+              <RoleTile label="Operation Manager" name={teamName(details.operationManager)} />
+              <RoleTile label="Internal Manager" name={teamName(details.internalManager)} />
             </div>
           </SectionBox>
 
@@ -340,11 +541,23 @@ export default function ClientProfileView({
                     <th className="px-4 py-2.5 text-[10px]">PAN</th>
                     <th className="px-4 py-2.5 text-[10px]">Relation</th>
                     <th className="px-4 py-2.5 text-[10px]">Date of Birth</th>
+                    <th className="px-4 py-2.5 text-[10px]">Mobile</th>
+                    <th className="px-4 py-2.5 text-[10px]">Email</th>
+                    <th className="px-4 py-2.5 text-[10px] w-8"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {applicantRows.map((f, i) => (
-                    <tr key={i} className="hover:bg-blue-50/40 dark:hover:bg-slate-900/20 transition-colors">
+                  {applicantRows.map((f, i) => {
+                    const rowKey = f.pan || f.name;
+                    const isFlashed = rowKey && flashApplicant === rowKey;
+                    return (
+                    <tr
+                      key={i}
+                      id={rowKey ? `applicant-row-${rowKey}` : undefined}
+                      onClick={() => setViewApplicant(f)}
+                      className={`hover:bg-blue-50/40 dark:hover:bg-slate-900/20 transition-colors cursor-pointer ${isFlashed ? 'ring-2 ring-inset ring-amber-400 bg-amber-50/60 dark:bg-amber-950/20 animate-pulse' : ''}`}
+                      title="View full applicant details"
+                    >
                       <td className="px-4 py-2.5">
                         <span className="inline-flex items-center gap-2.5">
                           <Avatar name={f.name} size="sm" />
@@ -362,11 +575,20 @@ export default function ClientProfileView({
                       <td className="px-4 py-2.5 text-slate-800 dark:text-slate-200">
                         {f.dob ? fmtDate(f.dob) : '—'}
                       </td>
+                      <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300 tabular-nums">{f.mobile || '—'}</td>
+                      <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300 lowercase">{f.email || '—'}</td>
+                      <td className="px-4 py-2.5 text-slate-350 dark:text-slate-600">
+                        <ChevronRight size={14} />
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
+              Click a row to view full applicant details.
+            </p>
           </SectionBox>
 
           {/* Box 4: Business Details (Products holding status) */}
@@ -400,7 +622,7 @@ export default function ClientProfileView({
             {details.openActivities && details.openActivities.length > 0 ? (
               <ListBox items={details.openActivities} emptyText="No open activities configured" />
             ) : (
-              openTasks.length === 0 && <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">No open activities or tasks configured</p>
+              openTasks.length === 0 && upcomingMeetings.length === 0 && <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">No open activities, tasks, or upcoming meetings</p>
             )}
 
             {openTasks.length > 0 && (
@@ -409,6 +631,15 @@ export default function ClientProfileView({
                   <ListChecks size={12} /> Tasks Module
                 </h5>
                 <OpenTasksBox tasks={openTasks} onSelectTask={onOpenTask} />
+              </div>
+            )}
+
+            {upcomingMeetings.length > 0 && (
+              <div className={(details.openActivities && details.openActivities.length > 0) || openTasks.length > 0 ? "mt-4 pt-4 border-t border-indigo-150/50 dark:border-indigo-900/30" : ""}>
+                <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-2.5 flex items-center gap-1.5">
+                  <Video size={12} /> Upcoming Meetings
+                </h5>
+                <MeetingsBox meetings={upcomingMeetings} onSelectMeeting={onOpenMeeting} />
               </div>
             )}
           </SectionBox>
@@ -434,19 +665,54 @@ export default function ClientProfileView({
 
       {/* Meeting Setup History */}
       <Card className="p-6 border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-xl rounded-3xl space-y-5">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-500 text-white flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <CalendarDays size={20} />
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-500 text-white flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <CalendarDays size={20} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Meeting Setup History</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium font-sans">
+                Completed &amp; past client-advisor meetings
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Meeting Setup History</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium font-sans">
-              Timeline record of client-advisor meeting interactions
-            </p>
+          <div className="flex items-center gap-2 shrink-0">
+            {onNavigateToMeetings && clientMeetings.length > 0 && (
+              <button
+                onClick={() => onNavigateToMeetings(clientMeetings[0].id)}
+                className={btnSecondary + ' py-1.5 px-3 text-[11px] flex items-center gap-1'}
+              >
+                View All
+              </button>
+            )}
+            {!isViewer && onScheduleMeeting && (
+              <button
+                onClick={() => onScheduleMeeting(client)}
+                className={btnPrimary + ' py-1.5 px-3 text-[11px] flex items-center gap-1'}
+              >
+                <Plus size={12} /> Schedule Meeting
+              </button>
+            )}
           </div>
         </div>
-        <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-          <ListBox items={details.meetingHistory} emptyText="No meeting history recorded" />
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
+          {details.meetingHistory && details.meetingHistory.length > 0 && (
+            <ListBox items={details.meetingHistory} emptyText="No meeting history recorded" />
+          )}
+
+          {pastMeetings.length === 0 ? (
+            (!details.meetingHistory || details.meetingHistory.length === 0) && (
+              <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">No completed meetings yet</p>
+            )
+          ) : (
+            <div className={details.meetingHistory && details.meetingHistory.length > 0 ? "pt-4 border-t border-cyan-150/50 dark:border-cyan-900/30" : ""}>
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-cyan-600 dark:text-cyan-400 mb-2.5 flex items-center gap-1.5">
+                <Video size={12} /> Meetings Module
+              </h5>
+              <MeetingsBox meetings={pastMeetings} onSelectMeeting={onOpenMeeting} />
+            </div>
+          )}
         </div>
       </Card>
 
@@ -464,13 +730,10 @@ export default function ClientProfileView({
               </p>
             </div>
           </div>
-          {onNavigateToProspects && clientProspects.length > 0 && (
-            <button
-              onClick={() => onNavigateToProspects(clientProspects[0].id)}
-              className={btnSecondary + ' py-1.5 px-3 text-[11px] flex items-center gap-1 shrink-0'}
-            >
-              View All
-            </button>
+          {clientProspects.length > 0 && (
+            <span className="text-[11px] font-bold text-indigo-500 dark:text-indigo-400 shrink-0">
+              {clientProspects.length} prospect{clientProspects.length !== 1 ? 's' : ''}
+            </span>
           )}
         </div>
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
@@ -488,6 +751,67 @@ export default function ClientProfileView({
                 <Briefcase size={12} /> Prospect Module
               </h5>
               <ProspectsBox prospects={clientProspects} onSelectProspect={onOpenProspect} />
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Change of Broker (COBR) */}
+      <Card className="p-6 border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-xl rounded-3xl space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white flex items-center justify-center shadow-lg shadow-violet-500/20">
+              <ArrowLeftRight size={20} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Change of Broker (COBR)</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium font-sans">
+                Broker-change requests for this client
+              </p>
+            </div>
+          </div>
+          {clientCobrTasks.length > 0 && (
+            <span className="text-[11px] font-bold text-violet-500 dark:text-violet-400 shrink-0">
+              {clientCobrTasks.length} request{clientCobrTasks.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+          {clientCobrTasks.length === 0 ? (
+            <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">No COBR requests for this client</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs min-w-[520px]">
+                <thead>
+                  <tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                    <th className="py-2 pr-3">Type</th>
+                    <th className="py-2 pr-3">Applicant</th>
+                    <th className="py-2 pr-3">Stage</th>
+                    <th className="py-2 pr-3">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientCobrTasks.map((t) => {
+                    const totals = cobrTotals(t.cobrEntries);
+                    return (
+                      <tr
+                        key={t.id}
+                        onClick={() => onOpenCobr && onOpenCobr(t)}
+                        className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/60 dark:hover:bg-slate-800/30 cursor-pointer transition-colors"
+                      >
+                        <td className="py-2.5 pr-3 font-semibold text-slate-700 dark:text-slate-300">{t.cobrType || '—'}</td>
+                        <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-400">{t.applicant || '—'}</td>
+                        <td className="py-2.5 pr-3">
+                          <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                            {t.stage || 'Open'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pr-3 font-bold text-slate-800 dark:text-slate-200 tabular-nums">₹{totals.total.toLocaleString('en-IN')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -546,6 +870,13 @@ export default function ClientProfileView({
             staticItems={attachmentFilter === 'custom' ? details.attachments : []}
             dynamicItems={dynamicAttachments.filter(doc => doc.type === attachmentFilter)}
             onPreview={setPreviewDoc}
+            onDeleteDoc={handleDeleteDoc}
+            onEditDoc={(doc) => {
+              setEditingDoc(doc);
+              setEditDocTitle(doc.attachment?.category || doc.attachment?.name?.split('_')[0] || doc.title || '');
+              setEditDocApplicant(doc.attachment?.applicantName || doc.attachment?.name?.split('_')[1] || client.name);
+            }}
+            isViewer={isViewer}
             client={client}
             emptyText="No documents match this category"
           />
@@ -570,68 +901,212 @@ export default function ClientProfileView({
         </div>
       </Card>
 
+      {/* Activity Log */}
+      <ClientActivityLog client={client} />
+
       {/* Upload Document Modal */}
-      {isUploadModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setIsUploadModalOpen(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md shadow-2xl border border-slate-200/50 dark:border-slate-800/80 p-6 animate-scale-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+      {isUploadModalOpen && createPortal(
+        <div className="fixed inset-0 bg-slate-50 dark:bg-slate-950 z-50 flex items-center justify-center p-0 md:p-6 overflow-hidden animate-fade-in" onClick={() => setIsUploadModalOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-none md:rounded-2xl w-full max-w-md shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up flex flex-col h-full md:h-auto max-h-screen" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 flex items-center justify-center">
                   <Upload size={16} />
                 </span>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white font-sans">Upload Document for {client.name}</h3>
               </div>
-              <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-slate-650 dark:hover:text-slate-300 transition-colors">
+              <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-slate-650 dark:hover:text-slate-300 transition-colors cursor-pointer">
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleUploadSubmit} className="mt-4 space-y-4">
+            <form onSubmit={handleUploadSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Step 1: Applicant */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">Document Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Identity Proof, Signed Consent Form"
-                  value={docTitle}
-                  onChange={(e) => setDocTitle(e.target.value)}
-                  className={inputCls + ' text-xs'}
-                />
+                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-500 text-white text-[8px] font-black mr-1.5">1</span>
+                  Applicant
+                </label>
+                <CoolSelect
+                  value={uploadApplicant || client.name}
+                  onChange={e => setUploadApplicant(e.target.value)}
+                  placeholder="Select applicant"
+                >
+                  {applicantRows.map(a => (
+                    <option key={a.name} value={a.name}>{a.name}{a.relation && a.relation !== 'Self' ? ` (${a.relation})` : ' (Self)'}</option>
+                  ))}
+                </CoolSelect>
               </div>
 
+              {/* Step 2: Document Title */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">Choose File</label>
+                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-500 text-white text-[8px] font-black mr-1.5">2</span>
+                  Document Title
+                </label>
+                <CoolSelect
+                  value={docTitle}
+                  onChange={e => setDocTitle(e.target.value)}
+                  placeholder="Select or type document title..."
+                  freeInput
+                >
+                  <option value="">-- Select Type --</option>
+                  <optgroup label="Identity Proof">
+                    <option>Aadhaar Card</option>
+                    <option>PAN Card</option>
+                    <option>Passport</option>
+                    <option>Voter ID</option>
+                    <option>Driving License</option>
+                    <option>Birth Certificate</option>
+                  </optgroup>
+                  <optgroup label="Address Proof">
+                    <option>Utility Bill</option>
+                    <option>Rent Agreement</option>
+                    <option>Ration Card</option>
+                  </optgroup>
+                  <optgroup label="Financial">
+                    <option>Cancelled Cheque</option>
+                    <option>Bank Statement (3 Months)</option>
+                    <option>Bank Statement (6 Months)</option>
+                    <option>ITR (3 Years)</option>
+                    <option>Computation (3 Years)</option>
+                    <option>Form 16</option>
+                    <option>CA Certificate</option>
+                  </optgroup>
+                  <optgroup label="Employment">
+                    <option>Salary Slip (Last 3 Months)</option>
+                    <option>Employment Letter</option>
+                    <option>Appointment Letter</option>
+                  </optgroup>
+                  <optgroup label="Medical">
+                    <option>Medical Report</option>
+                    <option>First Prescription</option>
+                    <option>ECG Report</option>
+                    <option>Blood Report</option>
+                    <option>X-Ray Report</option>
+                  </optgroup>
+                  <optgroup label="Insurance">
+                    <option>Passport Size Photo</option>
+                    <option>Policy Document</option>
+                    <option>Proposal Form</option>
+                    <option>Previous Policy</option>
+                    <option>Surrender Letter</option>
+                  </optgroup>
+                  <optgroup label="Other">
+                    <option>Other</option>
+                  </optgroup>
+                </CoolSelect>
+                {docTitle && (
+                  <p className="text-[10px] text-blue-500 dark:text-blue-400 mt-1 font-medium font-sans">
+                    Will be saved as: <span className="font-bold">{docTitle}</span> · <span>{uploadApplicant || client.name}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Step 3: File */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-500 text-white text-[8px] font-black mr-1.5">3</span>
+                  Choose File
+                </label>
                 <div className="relative border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center hover:border-blue-400 transition-colors cursor-pointer group">
                   <input
                     type="file"
                     required
                     onChange={handleFileChange}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   />
                   <Paperclip size={24} className="mx-auto text-slate-400 group-hover:text-blue-500 transition-colors mb-2" />
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-350 block font-sans">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-355 block font-sans">
                     {selectedFile ? selectedFile.name : 'Click to select or drag file here'}
                   </span>
                   <span className="text-[10px] text-slate-450 dark:text-slate-500 block mt-1 font-sans">
-                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : 'Image or PDF (Max 5MB)'}
+                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : 'Any format (Max 5MB)'}
                   </span>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-2">
-                <button type="button" onClick={() => setIsUploadModalOpen(false)} className={btnGhost + ' py-2 px-4'}>
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800 shrink-0">
+                <button type="button" onClick={() => { setIsUploadModalOpen(false); setDocTitle(''); setUploadApplicant(''); setSelectedFile(null); setSelectedFileDataUrl(''); }} className={btnGhost + ' py-2 px-4'}>
                   Cancel
                 </button>
-                <button type="submit" className={btnPrimary + ' py-2 px-5'}>
+                <button type="submit" disabled={!docTitle.trim() || !selectedFileDataUrl} className={btnPrimary + ' py-2 px-5 disabled:opacity-50 disabled:cursor-not-allowed'}>
                   Upload File
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Edit Document Modal */}
+      {editingDoc && createPortal(
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setEditingDoc(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 flex items-center justify-center">
+                  <Pencil size={16} />
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white font-sans">Edit Document</h3>
+              </div>
+              <button onClick={() => setEditingDoc(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"><X size={18} /></button>
+            </div>
+            <form onSubmit={handleEditDocSubmit} className="p-5 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">Document Title</label>
+                <CoolSelect value={editDocTitle} onChange={e => setEditDocTitle(e.target.value)} placeholder="Select or type title..." freeInput>
+                  <option value="">-- Select Type --</option>
+                  <optgroup label="Identity Proof">
+                    <option>Aadhaar Card</option><option>PAN Card</option><option>Passport</option>
+                    <option>Voter ID</option><option>Driving License</option><option>Birth Certificate</option>
+                  </optgroup>
+                  <optgroup label="Address Proof">
+                    <option>Utility Bill</option><option>Rent Agreement</option><option>Ration Card</option>
+                  </optgroup>
+                  <optgroup label="Financial">
+                    <option>Cancelled Cheque</option><option>Bank Statement (3 Months)</option>
+                    <option>Bank Statement (6 Months)</option><option>ITR (3 Years)</option>
+                    <option>Computation (3 Years)</option><option>Form 16</option><option>CA Certificate</option>
+                  </optgroup>
+                  <optgroup label="Employment">
+                    <option>Salary Slip (Last 3 Months)</option><option>Employment Letter</option><option>Appointment Letter</option>
+                  </optgroup>
+                  <optgroup label="Medical">
+                    <option>Medical Report</option><option>First Prescription</option>
+                    <option>ECG Report</option><option>Blood Report</option><option>X-Ray Report</option>
+                  </optgroup>
+                  <optgroup label="Insurance">
+                    <option>Passport Size Photo</option><option>Policy Document</option>
+                    <option>Proposal Form</option><option>Previous Policy</option><option>Surrender Letter</option>
+                  </optgroup>
+                  <optgroup label="Other"><option>Other</option></optgroup>
+                </CoolSelect>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-sans">Applicant</label>
+                <CoolSelect value={editDocApplicant} onChange={e => setEditDocApplicant(e.target.value)} placeholder="Select applicant">
+                  {applicantRows.map(a => (
+                    <option key={a.name} value={a.name}>{a.name}{a.relation && a.relation !== 'Self' ? ` (${a.relation})` : ' (Self)'}</option>
+                  ))}
+                </CoolSelect>
+              </div>
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button type="button" onClick={() => setEditingDoc(null)} className={btnGhost + ' py-2 px-4'}>Cancel</button>
+                <button type="submit" disabled={!editDocTitle.trim()} className={btnPrimary + ' py-2 px-5 disabled:opacity-50 disabled:cursor-not-allowed'}>Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
       )}
 
       {previewDoc && <DocPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+
+      {viewApplicant && (
+        <ApplicantViewModal applicant={viewApplicant} onClose={() => setViewApplicant(null)} />
+      )}
     </div>
   );
 }
@@ -818,7 +1293,7 @@ function ClosedActivitiesBox({ items, emptyText }) {
   );
 }
 
-function AttachmentsBox({ staticItems = [], dynamicItems = [], onPreview, client, emptyText }) {
+function AttachmentsBox({ staticItems = [], dynamicItems = [], onPreview, onDeleteDoc, onEditDoc, isViewer, client, emptyText }) {
   const hasStatic = staticItems && staticItems.length > 0;
   const hasDynamic = dynamicItems && dynamicItems.length > 0;
 
@@ -828,11 +1303,11 @@ function AttachmentsBox({ staticItems = [], dynamicItems = [], onPreview, client
 
   // Icons and styles lookup per document type
   const docMeta = {
-    mom: { icon: FileText, style: 'bg-blue-500/10 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400' },
-    goal: { icon: Target, style: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' },
-    asset: { icon: Wallet, style: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400' },
-    policy: { icon: Shield, style: 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' },
-    portfolio: { icon: FileBarChart, style: 'bg-rose-500/10 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400' },
+    mom: { icon: FileText, style: 'bg-blue-500/10 text-blue-600 dark:bg-blue-955/40 dark:text-blue-400' },
+    goal: { icon: Target, style: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-955/40 dark:text-emerald-400' },
+    asset: { icon: Wallet, style: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-955/40 dark:text-indigo-400' },
+    policy: { icon: Shield, style: 'bg-amber-500/10 text-amber-600 dark:bg-amber-955/40 dark:text-amber-400' },
+    portfolio: { icon: FileBarChart, style: 'bg-rose-500/10 text-rose-600 dark:bg-rose-955/40 dark:text-rose-400' },
   };
 
   return (
@@ -841,6 +1316,7 @@ function AttachmentsBox({ staticItems = [], dynamicItems = [], onPreview, client
       {dynamicItems.map((doc) => {
         const meta = docMeta[doc.type] || { icon: FileText, style: 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400' };
         const Icon = meta.icon;
+        const isDeletable = doc.type === 'mom';
         return (
           <div
             key={doc.id}
@@ -856,9 +1332,20 @@ function AttachmentsBox({ staticItems = [], dynamicItems = [], onPreview, client
                 <span className="text-[9px] text-slate-450 dark:text-slate-500 uppercase font-black tracking-wider block mt-0.5">Report Document</span>
               </div>
             </div>
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
-              <Eye size={12} /> View
-            </span>
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              {!isViewer && isDeletable && onDeleteDoc && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeleteDoc(e, doc); }}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-455 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-xl transition-all cursor-pointer opacity-0 group-hover:opacity-100 shrink-0"
+                  title="Delete Document"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Eye size={12} /> View
+              </span>
+            </div>
           </div>
         );
       })}
@@ -894,9 +1381,29 @@ function AttachmentsBox({ staticItems = [], dynamicItems = [], onPreview, client
                 </span>
               </div>
             </div>
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
-              <Eye size={12} /> View
-            </span>
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              {!isViewer && onEditDoc && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onEditDoc(doc); }}
+                  className="p-1.5 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-955/20 rounded-xl transition-all cursor-pointer opacity-0 group-hover:opacity-100 shrink-0"
+                  title="Edit Document"
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
+              {!isViewer && onDeleteDoc && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeleteDoc(e, doc); }}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-455 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-xl transition-all cursor-pointer opacity-0 group-hover:opacity-100 shrink-0"
+                  title="Delete Document"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Eye size={12} /> View
+              </span>
+            </div>
           </div>
         );
       })}
@@ -919,7 +1426,7 @@ function NotesFeed({ client, details, isViewer }) {
         id: 'legacy-1',
         text: details.notes,
         createdAt: client.updatedAt || new Date().toISOString(),
-        author: 'Nitesh Luthra'
+        author: getCurrentUser()?.name || 'System'
       }];
     }
     return [];
@@ -947,7 +1454,7 @@ function NotesFeed({ client, details, isViewer }) {
       id: uid(),
       text: newNoteText.trim(),
       createdAt: new Date().toISOString(),
-      author: 'Nitesh Luthra'
+      author: getCurrentUser()?.name || 'System'
     };
     const updated = [newNote, ...notesList];
     await saveNotes(updated);
@@ -1065,10 +1572,10 @@ function NotesFeed({ client, details, isViewer }) {
                   <div className="p-3.5 bg-slate-50/60 dark:bg-slate-955/20 hover:bg-white dark:hover:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/60 hover:border-slate-300 dark:hover:border-slate-700/80 rounded-xl transition-all duration-300 shadow-xs hover:shadow-md">
                     <div className="flex items-start justify-between gap-4 mb-2">
                       <div className="flex items-center gap-2">
-                        <Avatar name={note.author || 'Nitesh Luthra'} size="sm" />
+                        <Avatar name={note.author || 'System'} size="sm" />
                         <div>
                           <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
-                            {note.author || 'Nitesh Luthra'}
+                            {note.author || 'System'}
                           </span>
                           <span className="text-[10px] text-slate-450 dark:text-slate-500 ml-2 font-medium">
                             {new Date(note.createdAt).toLocaleString('en-IN', {
@@ -1119,76 +1626,282 @@ function OpenTasksBox({ tasks, onSelectTask, emptyText }) {
   if (!tasks || tasks.length === 0) {
     return <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">{emptyText}</p>;
   }
+  
+  // Limit to 5 tasks
+  const displayedTasks = tasks.slice(0, 5);
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {tasks.map((task) => (
-        <div
-          key={task.id}
-          onClick={() => onSelectTask && onSelectTask(task)}
-          className="p-2.5 bg-white dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/80 rounded-xl flex items-center justify-between gap-2 shadow-xs cursor-pointer transition-all duration-300 hover:border-indigo-300 hover:shadow-md hover:bg-blue-50/5 dark:hover:bg-slate-800/40"
-        >
-          <div className="min-w-0 flex-1">
-            <span className="font-bold text-[11px] text-slate-800 dark:text-slate-200 block truncate" title={task.taskName}>{task.taskName}</span>
-            <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 block truncate">
-              {task.assignedTo ? `To: ${task.assignedTo}` : 'Unassigned'}
-              {task.dueDate && ` • Due: ${new Date(task.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}
-            </span>
-          </div>
-          <span className={`inline-flex px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded-md ring-1 shrink-0 ${
-            task.stage === 'Open' ? 'bg-blue-50 text-blue-700 ring-blue-200/40 dark:bg-blue-950/20 dark:text-blue-400 dark:ring-blue-900/40' :
-            task.stage === 'In Process' ? 'bg-amber-50 text-amber-700 ring-amber-200/40 dark:bg-amber-950/20 dark:text-amber-400 dark:ring-amber-900/40' :
-            task.stage === 'Waiting For Client' ? 'bg-violet-50 text-violet-700 ring-violet-200/40 dark:bg-violet-950/20 dark:text-violet-400 dark:ring-violet-900/40' :
-            task.stage === 'Completed' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200/60 dark:bg-emerald-950/20 dark:text-emerald-400 dark:ring-emerald-900/40' :
-            task.stage === 'Lost' ? 'bg-rose-50 text-rose-700 ring-rose-200/60 dark:bg-rose-950/20 dark:text-rose-400 dark:ring-rose-900/40' :
-            'bg-slate-50 text-slate-700 ring-slate-200/40 dark:bg-slate-955/20 dark:text-slate-450 dark:ring-slate-900/40'
-          }`}>
-            {task.stage}
-          </span>
-        </div>
-      ))}
+    <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950 shadow-sm">
+      <table className="w-full text-xs text-left">
+        <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+          <tr>
+            <th className="px-4 py-3 text-[10px]">Task Name</th>
+            <th className="px-4 py-3 text-[10px]">Assigned To</th>
+            <th className="px-4 py-3 text-[10px] text-center">Due Date</th>
+            <th className="px-4 py-3 text-[10px] text-center">Stage</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {displayedTasks.map((task) => (
+            <tr
+              key={task.id}
+              onClick={() => onSelectTask && onSelectTask(task)}
+              className="cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+            >
+              <td className="px-4 py-3">
+                <span className="font-bold text-slate-855 dark:text-slate-200 block truncate max-w-xs" title={task.taskName}>
+                  {task.taskName}
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <span className="text-slate-700 dark:text-slate-300 font-medium">
+                  {task.assignedTo ? task.assignedTo : 'Unassigned'}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-400 tabular-nums">
+                {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              </td>
+              <td className="px-4 py-3 text-center">
+                <span className={`inline-flex px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded-md ring-1 shrink-0 ${
+                  task.stage === 'Open' ? 'bg-blue-50 text-blue-700 ring-blue-200/40 dark:bg-blue-950/20 dark:text-blue-400 dark:ring-blue-900/40' :
+                  task.stage === 'In Process' ? 'bg-amber-50 text-amber-700 ring-amber-200/40 dark:bg-amber-950/20 dark:text-amber-400 dark:ring-amber-900/40' :
+                  task.stage === 'Waiting For Client' ? 'bg-violet-50 text-violet-700 ring-violet-200/40 dark:bg-violet-950/20 dark:text-violet-400 dark:ring-violet-900/40' :
+                  task.stage === 'Completed' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200/60 dark:bg-emerald-950/20 dark:text-emerald-400 dark:ring-emerald-900/40' :
+                  task.stage === 'Lost' ? 'bg-rose-50 text-rose-700 ring-rose-200/60 dark:bg-rose-950/20 dark:text-rose-400 dark:ring-rose-900/40' :
+                  'bg-slate-50 text-slate-700 ring-slate-200/40 dark:bg-slate-955/20 dark:text-slate-450 dark:ring-slate-900/40'
+                }`}>
+                  {task.stage}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 function ProspectsBox({ prospects, onSelectProspect, emptyText }) {
+  const [page, setPage] = React.useState(0);
+
   if (!prospects || prospects.length === 0) {
     return <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">{emptyText}</p>;
   }
+
+  const PAGE = 5;
+  const totalPages = Math.ceil(prospects.length / PAGE);
+  const start = page * PAGE;
+  const pageProspects = prospects.slice(start, start + PAGE);
+  const remaining = prospects.length - (start + PAGE);
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {prospects.map((p) => (
-        <div
-          key={p.id}
-          onClick={() => onSelectProspect && onSelectProspect(p)}
-          className="p-2.5 bg-white dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/80 rounded-xl flex items-center justify-between gap-2 shadow-xs cursor-pointer transition-all duration-300 hover:border-indigo-300 hover:shadow-md hover:bg-blue-50/5 dark:hover:bg-slate-800/40"
-        >
-          <div className="min-w-0 flex-1">
-            <span className="font-bold text-[11px] text-slate-800 dark:text-slate-200 block truncate" title={p.proposalType}>{p.proposalType}</span>
-            <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 block truncate">
-              {fmtAmountINR(p.amount)}
-              <span className={`ml-1.5 inline-flex px-1 py-0.5 rounded ${CATEGORY_THEME[p.proposalCategory] || CATEGORY_THEME.investment}`}>{p.proposalCategory}</span>
-            </span>
-            {(p.proposalType === 'Proposed SIP Changes' || p.proposalType === 'sipchanges') && (p.sipRejected || p.sipContinue) && (
-              <div className="flex flex-wrap items-center gap-1 mt-1 text-[8px] font-bold uppercase tracking-wider">
-                {p.sipRejected && (
-                  <span className="px-1 py-0.5 rounded bg-rose-50 text-rose-700 ring-1 ring-rose-200/60 dark:bg-rose-950/30 dark:text-rose-400 dark:ring-rose-900/40">
-                    Rejected: {fmtAmountINR(p.sipRejected)}
+    <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950 shadow-sm">
+      <table className="w-full text-xs text-left">
+        <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+          <tr>
+            <th className="px-4 py-3 text-[10px]">Proposal Type</th>
+            <th className="px-4 py-3 text-[10px]">Applicant</th>
+            <th className="px-4 py-3 text-[10px] text-right">Amount</th>
+            <th className="px-4 py-3 text-[10px] text-center">Closing Date</th>
+            <th className="px-4 py-3 text-[10px] text-center">Stage</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {pageProspects.map((p) => (
+            <tr
+              key={p.id}
+              onClick={() => onSelectProspect && onSelectProspect(p)}
+              className="cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+            >
+              <td className="px-4 py-3">
+                <div className="font-bold text-slate-850 dark:text-slate-200">{p.proposalType}</div>
+                <div className="mt-1">
+                  <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${CATEGORY_THEME[p.proposalCategory] || CATEGORY_THEME.investment}`}>
+                    {p.proposalCategory}
                   </span>
+                </div>
+                {(p.proposalType === 'Proposed SIP Changes' || p.proposalType === 'sipchanges') && (p.sipRejected || p.sipContinue) && (
+                  <div className="flex flex-wrap items-center gap-1 mt-1 text-[8px] font-bold uppercase tracking-wider">
+                    {p.sipRejected && (
+                      <span className="px-1 py-0.5 rounded bg-rose-50 text-rose-700 ring-1 ring-rose-200/60 dark:bg-rose-950/30 dark:text-rose-400 dark:ring-rose-900/40">
+                        Rejected: {fmtAmountINR(p.sipRejected)}
+                      </span>
+                    )}
+                    {p.sipContinue && (
+                      <span className="px-1 py-0.5 rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-950/30 dark:text-emerald-400 dark:ring-emerald-900/40">
+                        Continue: {fmtAmountINR(p.sipContinue)}
+                      </span>
+                    )}
+                  </div>
                 )}
-                {p.sipContinue && (
-                  <span className="px-1 py-0.5 rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-950/30 dark:text-emerald-400 dark:ring-emerald-900/40">
-                    Continue: {fmtAmountINR(p.sipContinue)}
-                  </span>
-                )}
-              </div>
+              </td>
+              <td className="px-4 py-3">
+                <div className="font-semibold text-slate-700 dark:text-slate-300">{p.applicant || '—'}</div>
+                {p.pan && <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 uppercase">{p.pan}</div>}
+              </td>
+              <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-200 tabular-nums">
+                {fmtAmountINR(p.amount)}
+              </td>
+              <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-400 tabular-nums">
+                {p.closingDate ? new Date(p.closingDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              </td>
+              <td className="px-4 py-3 text-center">
+                <span className={`inline-flex px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md ring-1 shrink-0 ${ALL_STAGE_THEME[p.stage || 'Qualified']}`}>
+                  {p.stage || 'Qualified'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Pagination footer */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40">
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+          >
+            ← Prev
+          </button>
+
+          <div className="flex items-center gap-1.5">
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => setPage(i)}
+                className={`w-6 h-6 rounded-md text-[10px] font-black transition-colors ${
+                  i === page
+                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                {i + 1}
+              </button>
+            ))}
+            {remaining > 0 && (
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 ml-1">
+                +{remaining} more
+              </span>
             )}
           </div>
-          <span className={`inline-flex px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded-md ring-1 shrink-0 ${PROSPECT_STAGE_THEME[p.stage || 'Qualified']}`}>
-            {p.stage || 'Qualified'}
-          </span>
+
+          <button
+            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+            disabled={page === totalPages - 1}
+            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+          >
+            Next →
+          </button>
         </div>
-      ))}
+      )}
     </div>
+  );
+}
+
+function MeetingsBox({ meetings, onSelectMeeting, emptyText }) {
+  if (!meetings || meetings.length === 0) {
+    return <p className="text-xs text-slate-450 dark:text-slate-500 italic font-medium">{emptyText}</p>;
+  }
+
+  // Show only up to 5 meetings
+  const displayed = meetings.slice(0, 5);
+
+  return (
+    <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950 shadow-sm">
+      <table className="w-full text-xs text-left">
+        <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+          <tr>
+            <th className="px-4 py-3 text-[10px]">Meeting</th>
+            <th className="px-4 py-3 text-[10px]">When</th>
+            <th className="px-4 py-3 text-[10px] text-center">Mode</th>
+            <th className="px-4 py-3 text-[10px] text-center">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {displayed.map((m) => (
+            <tr
+              key={m.id}
+              onClick={() => onSelectMeeting && onSelectMeeting(m)}
+              className="cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+            >
+              <td className="px-4 py-3">
+                <div className="font-bold text-slate-850 dark:text-slate-200 truncate max-w-xs" title={m.title}>{m.title || 'Untitled meeting'}</div>
+                {m.assignedTo && <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">with {m.assignedTo}</div>}
+              </td>
+              <td className="px-4 py-3 text-slate-600 dark:text-slate-400 tabular-nums whitespace-nowrap">{fmtMeetingWhen(m)}</td>
+              <td className="px-4 py-3 text-center">
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-md ring-1 shrink-0 ${MODE_THEME[m.mode] || MODE_THEME.Online}`}>
+                  {m.mode === 'Offline' ? <Building size={9} /> : <Globe size={9} />} {m.mode || 'Online'}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-center">
+                <span className={`inline-flex px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md ring-1 shrink-0 ${MEETING_STATUS_THEME[m.status] || MEETING_STATUS_THEME.Scheduled}`}>
+                  {m.status || 'Scheduled'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Applicant view modal — opened by clicking a row in the "Family &
+// Applicants Details" table. Read-only: shows every field on file for that
+// applicant (Self or a family member), including income/occupation/nominee.
+// All editing happens in the Edit Client Details form (Modals.jsx), not here.
+// ---------------------------------------------------------------------------
+function ApplicantDetailRow({ label, value }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-100 dark:border-slate-800 last:border-b-0">
+      <span className="text-[11px] font-bold text-slate-450 dark:text-slate-500 uppercase tracking-wider shrink-0">{label}</span>
+      <span className="text-sm font-semibold text-slate-800 dark:text-slate-200 text-right break-words">{value || <span className="text-slate-350 dark:text-slate-600 italic font-normal">Not provided</span>}</span>
+    </div>
+  );
+}
+
+function ApplicantViewModal({ applicant: a, onClose }) {
+  return createPortal(
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+      <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Avatar name={a.name} size="sm" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white font-sans truncate">{a.name || 'Applicant'}</h3>
+              <p className="text-[10px] text-slate-450 dark:text-slate-500 font-medium">{a.relation || 'Self'}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-5 max-h-[70vh] overflow-y-auto">
+          <div className="space-y-0.5 px-3.5 -mx-3.5 rounded-xl">
+            <ApplicantDetailRow label="PAN" value={a.pan} />
+            <ApplicantDetailRow label="Relation" value={a.relation} />
+            <ApplicantDetailRow label="Date of Birth" value={a.dob ? fmtDate(a.dob) : ''} />
+            <ApplicantDetailRow label="Mobile" value={a.mobile} />
+            <ApplicantDetailRow label="Email" value={a.email} />
+          </div>
+          <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider pl-2 border-l-2 border-indigo-500 mt-5 mb-2">Additional Details</h4>
+          <div className="space-y-0.5 px-3.5 -mx-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/10">
+            <ApplicantDetailRow label="Income (Annual)" value={a.income} />
+            <ApplicantDetailRow label="Occupation" value={a.occupation} />
+            <ApplicantDetailRow label="Place of Birth" value={a.placeOfBirth} />
+            <ApplicantDetailRow label="Mother's Name" value={a.mothersName} />
+            <ApplicantDetailRow label="Nominee Name" value={a.nomineeName} />
+            <ApplicantDetailRow label="Nominee Relation" value={a.nomineeRelation} />
+          </div>
+        </div>
+        <div className="flex justify-end p-5 pt-0">
+          <button type="button" onClick={onClose} className={btnGhost + ' py-2 px-4'}>Close</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1207,24 +1920,46 @@ const TYPE_META = {
 function DocPreviewModal({ doc, onClose }) {
   const meta = TYPE_META[doc.type];
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-50 dark:bg-slate-950 z-50 flex items-center justify-center p-0 md:p-6 overflow-hidden animate-fade-in" onClick={onClose}>
       <style dangerouslySetInnerHTML={{ __html: DOC_PRINT_STYLES }} />
-      <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-3xl shadow-2xl my-8 border border-slate-200/50 dark:border-slate-800/80 animate-scale-up" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white dark:bg-slate-900 rounded-none md:rounded-2xl w-full max-w-3xl shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up flex flex-col h-full md:h-[90vh] max-h-screen" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="no-print flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+        <div className="no-print flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <span className={`w-9 h-9 rounded-xl bg-gradient-to-br ${meta.chip} text-white flex items-center justify-center shrink-0`}>
               <meta.icon size={17} />
             </span>
             <div className="min-w-0">
               <h3 className="text-base font-bold text-slate-900 dark:text-white truncate">{doc.title}</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{doc.client.name}{doc.date ? ` · ${fmtDate(doc.date)}` : ''}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{doc.client.name}{doc.date ? ` · ${fmtDate(doc.date)}` : ''}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => window.print()} className={btnSecondary + ' py-2 px-3'}>
-              <Printer size={14} /> Print
+            {/* A 'custom' doc's HTML renders inside a fixed-height, scrolling
+                <iframe> (see CustomDocPreview) — printing the PARENT window
+                only captures whatever ~500px happens to be visible in that
+                box, cutting off the rest of anything longer. Every other doc
+                type here is plain DOM content (no iframe), where the normal
+                window.print() + DOC_PRINT_STYLES approach already works fine. */}
+            <button
+              onClick={() => {
+                const isCustomHtml = doc.type === 'custom' && doc.attachment?.fileType === 'text/html' && doc.attachment?.html;
+                if (isCustomHtml) {
+                  printHtmlDocument(doc.attachment.html);
+                } else if (doc.type === 'mom' && doc.mom) {
+                  // Same polished, letterhead-branded rendering + print-safe
+                  // CSS as a saved MOM document — not the plain MomDoc table
+                  // below (that used window.print() on the live DOM, with no
+                  // page-margin/color-adjust/page-break handling at all).
+                  printHtmlDocument(wrapStandaloneHtml(buildMomHtml(doc.mom, doc.client), `Minutes of Meeting — ${doc.client.name}`));
+                } else {
+                  window.print();
+                }
+              }}
+              className={btnSecondary + ' py-2 px-3'}
+            >
+              <Printer size={14} /> Print / Save as PDF
             </button>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
               <X size={18} />
@@ -1233,26 +1968,29 @@ function DocPreviewModal({ doc, onClose }) {
         </div>
 
         {/* Document body */}
-        <div className="doc-print-body p-6 max-h-[72vh] overflow-y-auto">
+        <div className="doc-print-body p-6 overflow-y-auto flex-1">
           <div className="doc-letterhead hidden print:block mb-5">
             <div className="text-lg font-bold text-slate-900">Team Fintness</div>
             <div className="text-[11px] uppercase tracking-wider text-slate-500">{meta.label}</div>
           </div>
           {doc.type === 'custom' && <CustomDocPreview doc={doc} />}
-          {doc.type === 'mom' && <MomDoc mom={doc.mom} client={doc.client} />}
+          {doc.type === 'mom' && (
+            <div className="max-w-[800px] mx-auto" dangerouslySetInnerHTML={{ __html: buildMomHtml(doc.mom, doc.client) }} />
+          )}
           {doc.type === 'goal' && <GoalDoc goals={doc.goals} client={doc.client} />}
           {doc.type === 'asset' && <AssetDoc assetAllocation={doc.assetAllocation} client={doc.client} />}
           {doc.type === 'policy' && <PolicyDoc client={doc.client} />}
           {doc.type === 'portfolio' && <PortfolioDoc goals={doc.goals} assetAllocation={doc.assetAllocation} client={doc.client} />}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 function CustomDocPreview({ doc }) {
   const file = doc.attachment;
-  if (!file || (!file.dataUrl && !file.data)) {
+  if (!file || (!file.dataUrl && !file.data && !file.html)) {
     return (
       <div className="text-center py-12 space-y-4">
         <FolderOpen size={48} className="mx-auto text-slate-400 dark:text-slate-650" />
@@ -1264,9 +2002,12 @@ function CustomDocPreview({ doc }) {
     );
   }
 
-  const dataUrl = file.dataUrl || file.data;
   const isImage = file.fileType?.startsWith('image/');
   const isPdf = file.fileType === 'application/pdf';
+  const isHtml = file.fileType === 'text/html' && !!file.html;
+  // Rebuild from the patched (print-safe) HTML, not the stale file.dataUrl
+  // captured at save time — same fix as DocumentsView's CustomDocPreview.
+  const dataUrl = isHtml ? printSafeDataUrl(file.html) : (file.dataUrl || file.data);
 
   return (
     <div className="space-y-6">
@@ -1278,22 +2019,29 @@ function CustomDocPreview({ doc }) {
           </div>
           <div>
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 font-sans">{file.name || file.fileName}</h4>
-            <p className="text-[10px] text-slate-450 dark:text-slate-500 mt-0.5 font-sans">Uploaded by {file.uploadedBy || 'Nitesh Luthra'} {file.date ? `· ${new Date(file.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</p>
+            <p className="text-[10px] text-slate-450 dark:text-slate-500 mt-0.5 font-sans">Uploaded by {file.uploadedBy || 'System'} {file.date ? `· ${new Date(file.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</p>
           </div>
         </div>
-        <a 
-          href={dataUrl} 
-          download={file.fileName}
-          className={btnPrimary + ' py-2 px-3.5 text-[11px]'}
-        >
-          Download File
-        </a>
+        <div className="flex items-center gap-2">
+          {/* Print lives only on the modal's outer header button now — this
+              inner one duplicated it right next to Download, which read as
+              two separate, confusing print controls for the same document. */}
+          <a
+            href={dataUrl}
+            download={file.fileName}
+            className={btnPrimary + ' py-2 px-3.5 text-[11px]'}
+          >
+            Download File
+          </a>
+        </div>
       </div>
 
       {/* Preview container */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-955 flex items-center justify-center min-h-[300px] max-h-[500px]">
         {isImage ? (
           <img src={dataUrl} alt={file.name} className="max-w-full max-h-[500px] object-contain shadow-sm" />
+        ) : isHtml ? (
+          <iframe srcDoc={file.html} title={file.name} className="w-full h-[500px] border-0 bg-white" />
         ) : isPdf ? (
           <iframe src={dataUrl} title={file.name} className="w-full h-[500px] border-0" />
         ) : (
@@ -1325,68 +2073,6 @@ function KVRow({ label, value }) {
     <div className="flex justify-between gap-4 py-1.5 border-b border-slate-100 dark:border-slate-800/60 text-sm">
       <span className="text-slate-500 dark:text-slate-400">{label}</span>
       <span className="font-semibold text-slate-800 dark:text-slate-200 text-right">{value}</span>
-    </div>
-  );
-}
-
-function BulletList({ items }) {
-  const list = (items || []).filter(Boolean);
-  if (list.length === 0) return <p className="text-sm text-slate-400 dark:text-slate-500 italic">None recorded.</p>;
-  return (
-    <ul className="space-y-1.5">
-      {list.map((it, i) => (
-        <li key={i} className="flex gap-2 text-sm text-slate-700 dark:text-slate-300">
-          <span className="text-blue-500 mt-0.5">•</span>
-          <span>{typeof it === 'string' ? it : JSON.stringify(it)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function MomDoc({ mom, client }) {
-  const d = mom.data || {};
-  return (
-    <div>
-      <DocSection title="Meeting Details">
-        <KVRow label="Client" value={client.name} />
-        <KVRow label="Meeting Number" value={mom.meetingNumber} />
-        <KVRow label="Meeting Date" value={mom.meetingDate ? fmtDate(mom.meetingDate) : '—'} />
-        <KVRow label="Advisor" value={d.advisorName} />
-        <KVRow label="Mode" value={d.meetingMode} />
-      </DocSection>
-
-      {(d.occupation || d.income || d.expenses || d.maritalStatus) && (
-        <DocSection title="Client Snapshot">
-          <KVRow label="Occupation" value={d.occupation} />
-          <KVRow label="Monthly Income" value={d.income} />
-          <KVRow label="Monthly Expenses" value={d.expenses} />
-          <KVRow label="Marital Status" value={d.maritalStatus} />
-          <KVRow label="Spouse" value={d.spouseName} />
-        </DocSection>
-      )}
-
-      {Array.isArray(d.goals) && d.goals.length > 0 && (
-        <DocSection title="Goals Discussed">
-          {d.goals.map((g, i) => (
-            <KVRow key={i} label={g.name} value={`Target ${fmtINR(g.target)} · Accumulated ${fmtINR(g.accumulated)}`} />
-          ))}
-        </DocSection>
-      )}
-
-      <DocSection title="Agenda"><BulletList items={d.agenda} /></DocSection>
-      <DocSection title="Discussion Points"><BulletList items={d.discussion} /></DocSection>
-      <DocSection title="Our Recommendations"><BulletList items={d.ourRecs} /></DocSection>
-      <DocSection title="Client Recommendations / Asks"><BulletList items={d.clientRecs} /></DocSection>
-
-      {d.followupRequired && (
-        <DocSection title="Follow-up">
-          <KVRow label="Required" value={d.followupRequired} />
-          <KVRow label="Date" value={d.followupDate ? fmtDate(d.followupDate) : ''} />
-          <KVRow label="Purpose" value={d.followupPurpose} />
-          <KVRow label="Notes" value={d.followupNotes} />
-        </DocSection>
-      )}
     </div>
   );
 }
@@ -1591,7 +2277,7 @@ function PortfolioDoc({ goals, assetAllocation, client }) {
                     </td>
                     <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400">{g.targetYear}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtINR(c.futureValue)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtSip(g.currentSip)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-slate-300">{fmtSip(c.todayEffectiveSip)}</td>
                     <td className="px-3 py-2.5 text-center font-bold text-emerald-600 dark:text-emerald-400">
                       {c.achievementPct.toFixed(1)}%
                     </td>
