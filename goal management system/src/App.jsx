@@ -1,18 +1,22 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Users, Target, FileBarChart, Plus, ChevronLeft, ChevronRight, Trash2, X,
   Calendar, Percent, Search, SlidersHorizontal, Pencil, Info, Shield, Plane, Car,
   Home, Heart, GraduationCap, Gift, CheckCircle2,
-  AlertCircle, Download, RefreshCw, Save, FileText, Wallet, PieChart, User, UserPlus, UserCheck
+  AlertCircle, Download, RefreshCw, Save, FileText, Wallet, PieChart, User, UserPlus, UserCheck,
+  LayoutDashboard, Video, TrendingUp, Bell, MessageSquare, Sun, Moon, LogOut, ArrowLeft
 } from 'lucide-react';
 
 // DB Service & Calculation Utils
-import { 
-  getClients, addClient, updateClient, deleteClient, addGoal, updateGoal, deleteGoal 
+import {
+  getClients, addClient, updateClient, deleteClient, addGoal, updateGoal, deleteGoal, getLeadMoms, reparentLeadMoms
 } from './services/db';
 import {
-  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween, buildGoalEdits
+  calcGoal, CURRENT_YEAR, CURRENT_MONTH, uid, monthsBetween, buildGoalEdits, initials
 } from './utils/calc';
+import { loadAdvisorProfile, hydrateAdvisorProfile } from './utils/advisorProfile';
+import logoImg from './assets/logo.png';
 
 // Subcomponents
 import ClientList from './components/ClientList';
@@ -24,38 +28,106 @@ import { ClientFormModal, GoalFormModal, ExcelImportModal } from './components/M
 import { AssetAllocationList, AssetAllocationDetail } from './components/AssetAllocation';
 import AssetAllocationModal from './components/AssetAllocationModal';
 import ClientProfileView from './components/ClientProfile';
+import MyProfileView from './components/MyProfile';
+import UsersAdmin from './components/UsersAdmin';
+import ActivityLogView from './components/ActivityLogView';
+import PermissionsMatrix from './components/PermissionsMatrix';
+import ChangePasswordModal from './components/ChangePasswordModal';
+import ChatView from './components/chat/ChatView';
+import { connectChat, disconnectChat, onChatEvent, fetchConversations as fetchChatConversations, fetchChatUsers } from './services/chat';
+import ChatHoverPreview from './components/ChatHoverPreview';
 import { normalizeAllocation, buildAllocationEdits, hasAllocation } from './utils/assets';
 import { StatTile } from './components/UI';
 import Login from './components/Login';
-import { isAuthenticated, setAuthenticated, clearAuthentication, isViewerRole } from './utils/auth';
+import { isAuthenticated, isViewerRole, isAdminRole, refreshSession, logout as apiLogout, getCurrentUser } from './utils/auth';
 import MomWorkspace from './components/MomWorkspace';
 import ProposalWorkspace from './components/ProposalWorkspace';
 import Sidebar from './components/Sidebar';
 import TasksView, { TaskFormModal } from './components/TasksView';
+import QueriesView, { QueryFormModal } from './components/QueriesView';
+import LeaveView from './components/LeaveView';
+import CobrView from './components/CobrView';
+import CobrFormModal from './components/CobrFormModal';
+import CobrTaskModal from './components/CobrTaskModal';
 import DocumentsView from './components/DocumentsView';
 import ProspectsView, { ProspectModal } from './components/BusinessProspects';
-import PolicyReview from './components/PolicyReview';
-import { loadTasks, saveTasks } from './utils/tasks';
-import { loadProspects, saveProspects } from './utils/prospects';
+import ReviewWorkspace from './components/ReviewWorkspace';
+import MeetingsView, { MeetingFormModal } from './components/MeetingsView';
+import DashboardView from './components/DashboardView';
+import LeadsView from './components/LeadsView';
+import OthersView from './components/OthersView';
+import { loadLeads, hydrateLeads, updateLead, clientPayloadFromLead, markConnectedFromTask, syncMeetingToLead, leadName as leadNameOf } from './services/leads';
+import { loadTasks, saveTasks, hydrateTasks } from './utils/tasks';
+import { loadQueries, saveQueries, hydrateQueries, QUERY_STAGES, uploadQueryAttachment } from './utils/queries';
+import { loadLeave, hydrateLeave } from './utils/leave';
+import { canRespondToLeave } from './utils/permissions';
+import { loadProspects, saveProspects, hydrateProspects } from './utils/prospects';
+import { loadMeetings, saveMeetings, hydrateMeetings } from './utils/meetings';
+import { hydrateTeam, loadTeam, teamName } from './services/team';
+import { hydratePermissions } from './services/permissions';
+import {
+  hydrateNotifications, startNotificationStream, stopNotificationStream, loadNotifications,
+  onNotificationsUpdated, onNotificationArrival, markNotificationRead, markAllNotificationsRead, clearNotifications,
+} from './services/notifications';
+import NotificationPanel from './components/NotificationPanel';
+import NotificationToaster from './components/NotificationToaster';
+import InstallPrompt from './components/InstallPrompt';
+import { subscribeToPush, unsubscribeFromPush } from './services/push';
 
 export default function App() {
   const [authed, setAuthed] = useState(() => isAuthenticated());
   const [isViewer, setIsViewer] = useState(() => isViewerRole());
+  const [isAdmin, setIsAdmin] = useState(() => isAdminRole());
   const [clients, setClients] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [view, setView] = useState('leads'); // top-level: 'leads' | 'clients' | 'tasks'
+  const [view, setView] = useState('dashboard'); // top-level: 'dashboard' | 'leads' | 'clients' | 'tasks' | 'meetings' | 'documents' | 'prospects' | 'reports' | 'myprofile'
+  // True while a module's data is being re-fetched on navigation (small spinner
+  // in the top dock). Every sidebar/notification click re-pulls just that
+  // module's data so newly-arrived items appear without a full app reload.
+  const [refreshingModule, setRefreshingModule] = useState(false);
   const [tab, setTab] = useState('clients');
+  const [activeDropdown, setActiveDropdown] = useState(null); // 'chat' | 'bell' | 'profile' | null
+  const [activeAnim, setActiveAnim] = useState({ chat: false, bell: false, profile: false });
 
-  const handleLogin = (role) => {
-    setAuthenticated(role);
-    setIsViewer(role === 'viewer');
+  const [advisorProfile, setAdvisorProfile] = useState(() => loadAdvisorProfile());
+
+  useEffect(() => {
+    const handler = () => setAdvisorProfile(loadAdvisorProfile());
+    window.addEventListener('crm:advisor-profile-updated', handler);
+    return () => window.removeEventListener('crm:advisor-profile-updated', handler);
+  }, []);
+
+
+
+  const triggerAnim = (type) => {
+    setActiveAnim(prev => ({ ...prev, [type]: true }));
+    setTimeout(() => {
+      setActiveAnim(prev => ({ ...prev, [type]: false }));
+    }, 750);
+  };
+
+  const handleToolbarClick = (type) => {
+    triggerAnim(type);
+    setActiveDropdown(prev => (prev === type ? null : type));
+  };
+
+  const handleLogin = (user) => {
+    setIsViewer(false);
+    setIsAdmin((user.roles || []).includes('ADMIN'));
     setAuthed(true);
   };
 
-  const handleLogout = () => {
-    clearAuthentication();
+  const handleLogout = async () => {
+    await unsubscribeFromPush(); // before the session cookie is cleared, so the request authenticates
+    apiLogout();
+    disconnectChat();
+    setChatUnread(0);
+    clearNotifications();
+    setNotifications([]);
     setAuthed(false);
     setIsViewer(false);
+    setIsAdmin(false);
+    if (view === 'users' || view === 'chat') setView('dashboard');
     setSelectedClientId(null);
     setSelectedGoalId(null);
     setSelectedGoalName(null);
@@ -68,10 +140,17 @@ export default function App() {
   
   // Selection States
   const [selectedClientId, setSelectedClientId] = useState(null);
+  // Set by the client search dropdown's "Applicants" results — tells
+  // ClientProfile which family member to scroll to/highlight once open.
+  const [highlightApplicant, setHighlightApplicant] = useState(null); // { clientId, pan, name } | null
   const [selectedGoalId, setSelectedGoalId] = useState(null);
   const [selectedGoalName, setSelectedGoalName] = useState(null);
   const [activeTaskId, setActiveTaskId] = useState(null);
-  
+  const [activeQueryId, setActiveQueryId] = useState(null);
+  const [activeCobrId, setActiveCobrId] = useState(null);
+  const [activeLeadId, setActiveLeadId] = useState(null);
+  const [activeLeaveId, setActiveLeaveId] = useState(null);
+
   // Modal states
   const [showAddClient, setShowAddClient] = useState(false);
   const [showGoalForm, setShowGoalForm] = useState(false);
@@ -81,19 +160,83 @@ export default function App() {
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [tasksChangeCounter, setTasksChangeCounter] = useState(0);
+  const [showQueryForm, setShowQueryForm] = useState(false);
+  const [editingQuery, setEditingQuery] = useState(null);
+  const [queriesChangeCounter, setQueriesChangeCounter] = useState(0);
+  const [showCobrForm, setShowCobrForm] = useState(false);
+  const [editingCobr, setEditingCobr] = useState(null);
+  const [cobrAllowReopen, setCobrAllowReopen] = useState(false);
+  const [cobrInteractive, setCobrInteractive] = useState(true);
   const [showProspectForm, setShowProspectForm] = useState(false);
   const [editingProspect, setEditingProspect] = useState(null);
   const [prospectsChangeCounter, setProspectsChangeCounter] = useState(0);
   const [activeProspectId, setActiveProspectId] = useState(null);
+  const [prospectQuery, setProspectQuery] = useState('');
+  const [showMeetingForm, setShowMeetingForm] = useState(false);
+  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [meetingFormLocked, setMeetingFormLocked] = useState(false);
+  const [meetingsChangeCounter, setMeetingsChangeCounter] = useState(0);
+  const [activeMeetingId, setActiveMeetingId] = useState(null);
+  const [leadsChangeCounter, setLeadsChangeCounter] = useState(0);
+  const [leadsBadge, setLeadsBadge] = useState(0);
+  // Sidebar "pending" count badges per module (tasks/cobr/meetings/prospects/queries).
+  const [moduleBadges, setModuleBadges] = useState({ tasks: 0, cobr: 0, meetings: 0, prospects: 0, queries: 0 });
+  // Pending-leave-requests-awaiting-my-decision count (Admin / Internal Manager
+  // only) — shown next to the "Leave" item in the Account Settings dropdown,
+  // since Leave has no sidebar nav icon to badge instead.
+  const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+  const [convertingLead, setConvertingLead] = useState(null);
 
   // Asset allocation tab states
   const [assetClientId, setAssetClientId] = useState(null);
   const [momClientId, setMomClientId] = useState(null);
+  // Set when reopening an already-created client-side MOM (clicking the
+  // "MOM Created" pill in the Meetings table) — tells MomWorkspace which
+  // saved draft to load straight into edit mode instead of a fresh one.
+  const [momEditMomId, setMomEditMomId] = useState(null);
+  // Set while a fresh MOM is being drafted from a specific Completed meeting
+  // (the Meetings table's "Create MOM" button) — MomWorkspace stamps this
+  // meeting with the new MOM's id on first save, so the button can flip to
+  // "MOM Created" instead of re-showing "Create MOM" on the same meeting.
+  const [momSourceMeetingId, setMomSourceMeetingId] = useState(null);
+  // Lead-side MOM (the "Create MoM" lead stage, before conversion) — rendered
+  // as a full-screen overlay ON TOP of whatever view/tab is already active,
+  // never a view/tab redirect, so closing it drops you back exactly where
+  // you were (no "Draft MOM" tab detour like the client-side flow above).
+  const [momLeadId, setMomLeadId] = useState(null);
+  const [momLeadMoms, setMomLeadMoms] = useState([]);
+  // True while momLeadMoms is being fetched for the currently-open lead —
+  // MomWorkspace must not mount until this settles, otherwise both the
+  // meeting-number auto-increment and the "open existing draft in edit mode"
+  // logic run against an empty moms list (a real race: the fetch is async,
+  // the overlay used to render immediately) and silently create a DUPLICATE
+  // "Meeting #1" instead of continuing/incrementing the real one.
+  const [momLeadMomsLoading, setMomLeadMomsLoading] = useState(false);
+  // Set when reopening an ALREADY-created lead MOM for editing (clicking the
+  // "MoM Created" pill) — tells MomWorkspace which saved draft to load
+  // straight into edit mode, instead of starting a fresh blank one.
+  const [momLeadEditMomId, setMomLeadEditMomId] = useState(null);
   const [clientProfileId, setClientProfileId] = useState(null);
   const [proposalClientId, setProposalClientId] = useState(null);
   const [reviewClientId, setReviewClientId] = useState(null);
   const [proposalSubTab, setProposalSubTab] = useState('insurance');
+  const [reviewSubTab, setReviewSubTab] = useState('policy');
+  const [othersSubTab, setOthersSubTab] = useState('other_tools');
   const [showAllocModal, setShowAllocModal] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+  // Hover-preview data for the chat dock icon — a lightweight mirror of what
+  // ChatView itself fetches, kept here so the preview works without having
+  // to mount the whole Chat module first.
+  const [chatConversationsPreview, setChatConversationsPreview] = useState([]);
+  const [chatUsersById, setChatUsersById] = useState(new Map());
+  const [chatPreviewOpen, setChatPreviewOpen] = useState(false);
+  const chatPreviewCloseTimer = useRef(null);
+  // Set by clicking a chat hover-preview item — tells ChatView which
+  // conversation (and MessagePane which message) to jump straight into.
+  const [pendingChatOpen, setPendingChatOpen] = useState(null); // { conversationId, messageId } | null
+  const [notifications, setNotifications] = useState([]);
+  const [showChatSplash, setShowChatSplash] = useState(false);
   
   // Filters & Report view states
   const [reportGoalFilter, setReportGoalFilter] = useState('all');
@@ -115,10 +258,21 @@ export default function App() {
     localStorage.setItem('gms:theme', theme);
   }, [theme]);
 
-  // Load clients on startup
+  // Load clients + hydrate the leads/tasks caches on startup
   const loadData = async () => {
     try {
-      const data = await getClients();
+      const [data] = await Promise.all([
+        getClients(),
+        hydrateLeads().catch((err) => console.error('Failed to load leads:', err)),
+        hydrateTasks().catch((err) => console.error('Failed to load tasks:', err)),
+        hydrateQueries().catch((err) => console.error('Failed to load queries:', err)),
+        hydrateLeave().catch((err) => console.error('Failed to load leave requests:', err)),
+        hydrateMeetings().catch((err) => console.error('Failed to load meetings:', err)),
+        hydrateProspects().catch((err) => console.error('Failed to load prospects:', err)),
+        hydrateAdvisorProfile().catch((err) => console.error('Failed to load advisor profile:', err)),
+        hydrateTeam().catch((err) => console.error('Failed to load team directory:', err)),
+        hydratePermissions().catch((err) => console.error('Failed to load permissions:', err)),
+      ]);
       setClients(data);
     } catch (err) {
       console.error('Failed to load clients:', err);
@@ -134,9 +288,215 @@ export default function App() {
     };
   }, []);
 
+  // When any proposal page creates a new prospect it dispatches this event but
+  // never touches prospectsChangeCounter (that counter is edit-only). Increment
+  // it here so every subscriber that depends on the counter also refreshes.
+  useEffect(() => {
+    const bump = () => setProspectsChangeCounter(prev => prev + 1);
+    window.addEventListener('crm:prospects-updated', bump);
+    return () => window.removeEventListener('crm:prospects-updated', bump);
+  }, []);
+
+  // Tasks are hydrated from the API asynchronously (see loadData); once that
+  // completes it dispatches this event so every subscriber depending on
+  // tasksChangeCounter (TasksView, DashboardView, ClientProfile) refreshes.
+  useEffect(() => {
+    const bump = () => setTasksChangeCounter(prev => prev + 1);
+    window.addEventListener('crm:tasks-updated', bump);
+    return () => window.removeEventListener('crm:tasks-updated', bump);
+  }, []);
+
+  // Same for queries.
+  useEffect(() => {
+    const bump = () => setQueriesChangeCounter(prev => prev + 1);
+    window.addEventListener('crm:queries-updated', bump);
+    return () => window.removeEventListener('crm:queries-updated', bump);
+  }, []);
+
+  // Same for meetings — MeetingsView/DashboardView already self-listen to
+  // this event, but ClientProfile only reacts to meetingsChangeCounter.
+  useEffect(() => {
+    const bump = () => setMeetingsChangeCounter(prev => prev + 1);
+    window.addEventListener('crm:meetings-updated', bump);
+    return () => window.removeEventListener('crm:meetings-updated', bump);
+  }, []);
+
+  // Latest values for the always-on chat desktop-notification listener below.
+  // That listener's socket subscription is set up once (on login), so it reads
+  // through this ref to avoid stale closures over view / directory / previews.
+  const chatNotifCtx = useRef({ view, chatUsersById, chatConversationsPreview });
+  useEffect(() => {
+    chatNotifCtx.current = { view, chatUsersById, chatConversationsPreview };
+  }, [view, chatUsersById, chatConversationsPreview]);
+
+  // Show a native desktop notification for an incoming chat message — but only
+  // when the user isn't already watching it live (tab hidden, or they're on a
+  // different module). Uses the same OS Notification permission that push asks
+  // for on login. (Recipients whose tab is fully CLOSED are covered separately
+  // by the server's Web Push — see routes/chat.js — so the two never overlap.)
+  const notifyChatMessage = (message) => {
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      const { view: curView, chatUsersById: users, chatConversationsPreview: convs } = chatNotifCtx.current;
+      if (!document.hidden && curView === 'chat') return; // actively in chat — they see it live
+      const sender = users.get(message.senderId);
+      const conv = convs.find((c) => c.id === message.conversationId);
+      const isGroup = conv?.type === 'GROUP';
+      const senderName = sender?.name || 'New message';
+      const preview = message.type === 'poll' ? '📊 Poll'
+        : (message.content && message.content.trim()) ? message.content.trim()
+        : ((message.attachments || []).length ? '📎 Attachment' : 'New message');
+      const title = isGroup ? (conv?.name || 'Group chat') : senderName;
+      const body = (isGroup ? `${senderName}: ${preview}` : preview).slice(0, 140);
+      const notif = new Notification(title, {
+        body,
+        tag: `chat-${message.conversationId}`, // collapse a burst from the same chat
+        renotify: true,
+        icon: sender?.photo || '/pwa-192x192.png',
+      });
+      notif.onclick = () => {
+        window.focus();
+        setPendingChatOpen({ conversationId: message.conversationId, messageId: message.id });
+        setActiveDropdown(null);
+        setView('chat');
+        notif.close();
+      };
+    } catch { /* Notification can throw on some platforms — never break chat over it */ }
+  };
+
+  // Chat: keep one socket alive for the whole session so real-time messages
+  // (and the topbar/sidebar unread badge) work from any screen, not just the
+  // chat view. The badge is re-derived from the server on every relevant
+  // event, so it can never drift.
+  useEffect(() => {
+    if (!authed) return;
+    connectChat();
+    let cancelled = false;
+    const refreshChatPreview = async () => {
+      try {
+        const { conversations } = await fetchChatConversations();
+        if (cancelled) return;
+        setChatUnread(conversations.reduce((sum, c) => sum + (c.unread || 0), 0));
+        setChatConversationsPreview(conversations);
+      } catch { /* server unreachable — keep last value */ }
+    };
+    refreshChatPreview();
+    // Directory for the hover preview (names/photos) — fetched once per
+    // session, same source ChatView itself uses.
+    fetchChatUsers().then(({ users }) => {
+      if (!cancelled) setChatUsersById(new Map(users.map((u) => [u.id, u])));
+    }).catch(() => {});
+    const meId = getCurrentUser()?.id;
+    const offNew = onChatEvent('message:new', ({ message }) => {
+      if (message.senderId !== meId) { refreshChatPreview(); notifyChatMessage(message); }
+    });
+    const offRead = onChatEvent('read', ({ userId }) => {
+      if (userId === meId) refreshChatPreview();
+    });
+    const offConv = onChatEvent('conversation:new', refreshChatPreview);
+    return () => { cancelled = true; offNew(); offRead(); offConv(); };
+  }, [authed]);
+
+  // A pending chat-preview jump only makes sense while we're about to enter
+  // (or are in) Chat — drop it once the user navigates elsewhere, so
+  // reopening the same conversation later via the sidebar list doesn't
+  // unexpectedly re-jump/highlight an old message.
+  useEffect(() => {
+    if (view !== 'chat') setPendingChatOpen(null);
+  }, [view]);
+
+  // Same idea for a pending client-search "jump to this applicant" —
+  // once we've left the Client Profile tab, drop it so returning to a
+  // profile later (via the normal client list) doesn't re-highlight.
+  useEffect(() => {
+    if (tab !== 'profile') setHighlightApplicant(null);
+  }, [tab]);
+
+  // Notifications: hydrate the unread list, attach the live stream (the shared
+  // chat socket also carries `notification:new`), and mirror the store's cache
+  // into React state so the bell badge + panel re-render on every change.
+  useEffect(() => {
+    if (!authed) return;
+    connectChat();
+    startNotificationStream();
+    hydrateNotifications();
+    subscribeToPush(); // OS-level push, alongside the socket stream above — no-op if unsupported/declined
+    const off = onNotificationsUpdated(() => setNotifications(loadNotifications()));
+    setNotifications(loadNotifications());
+    // Detach the socket listener when this session ends (authed -> false on
+    // logout) so a later re-login in the same tab — a fresh socket instance
+    // — reattaches instead of silently staying subscribed to nothing.
+    return () => { off(); stopNotificationStream(); };
+  }, [authed]);
+
+  // When a notification ARRIVES live (e.g. someone assigns you a task, raises a
+  // query, or schedules a meeting), the bell/toast updated — but the actual
+  // module data (your task list, prospects, etc.) was NOT re-fetched, so the
+  // new item only showed up after a manual page refresh. Re-hydrate the
+  // relevant module on arrival so the item appears in real time. Each
+  // hydrate() dispatches its own `crm:*-updated` event, which bumps the change
+  // counters the views already listen on, so TasksView / DashboardView /
+  // ClientProfile / etc. re-render with the fresh data automatically.
+  useEffect(() => {
+    if (!authed) return;
+    return onNotificationArrival((n) => {
+      const refreshers = {
+        TASK_ASSIGNED: hydrateTasks,
+        TASK_DUE: hydrateTasks,
+        PROSPECT_ASSIGNED: hydrateProspects,
+        MEETING_SOON: hydrateMeetings,
+        LEAD_NEW: hydrateLeads,
+        LEAD_RM_ASSIGNED: hydrateLeads,
+        QUERY_RAISED: hydrateQueries,
+        QUERY_RESOLVED: hydrateQueries,
+        QUERY_COMMENTED: hydrateQueries,
+        LEAVE_APPLIED: hydrateLeave,
+        LEAVE_RESPONDED: hydrateLeave,
+      };
+      const refresh = refreshers[n?.type];
+      if (refresh) refresh().catch(() => { /* transient — the next arrival or a manual refresh recovers */ });
+    });
+  }, [authed]);
+
+  // Clicking an OS push notification posts a message from the service worker
+  // (src/sw.js) with the same {view,id} link shape the in-app bell uses —
+  // route through the exact same handler as clicking it in-app.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const handler = (event) => {
+      if (event.data?.type !== 'notification-click') return;
+      handleOpenNotification({ id: event.data.notificationId, link: event.data.link });
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (authed) loadData();
   }, [authed]);
+
+  // On startup, re-validate the session against the server (the httpOnly cookie
+  // is the real credential; the cached user is only a UI hint). This corrects a
+  // stale cache and logs the user out if the session has expired / was revoked.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const user = await refreshSession();
+      if (cancelled) return;
+      if (user) {
+        setIsViewer(false);
+        setIsAdmin((user.roles || []).includes('ADMIN'));
+        setAuthed(true);
+      } else if (isAuthenticated() === false) {
+        // Server says no valid session and cache is cleared -> ensure logged out.
+        setAuthed(false);
+        setIsViewer(false);
+        setIsAdmin(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const selectedClient = clients.find(c => c.id === selectedClientId);
   const selectedGoal = selectedClient?.goals?.find(g => g.id === selectedGoalId);
@@ -145,6 +505,48 @@ export default function App() {
   const profileClient = clients.find(c => c.id === clientProfileId);
   const proposalClient = clients.find(c => c.id === proposalClientId);
   const reviewClient = clients.find(c => c.id === reviewClientId);
+
+  // Lead-mode MOM subject — shaped exactly like the `client` prop
+  // MomWorkspace already reads (id/name/pan/clientDetails/moms), built from
+  // the lead + the moms fetched for it below, so MomWorkspace itself needs no
+  // structural changes to work against a not-yet-converted lead.
+  const momLead = useMemo(
+    () => (momLeadId ? loadLeads().find(l => l.id === momLeadId) : null),
+    [momLeadId, leadsChangeCounter]
+  );
+  const momLeadSubject = useMemo(() => {
+    if (!momLead) return null;
+    return {
+      id: momLead.id,
+      name: leadNameOf(momLead),
+      pan: momLead.pan || '',
+      clientDetails: { relationshipManager: momLead.ownerId || '' },
+      moms: momLeadMoms,
+      // Whether the lead has already been stamped "Create MoM" with a MOM id
+      // — lets MomWorkspace tell an explicit save (which should stamp it,
+      // once) apart from a background autosave tick (which never should).
+      momId: momLead.momId || null,
+    };
+  }, [momLead, momLeadMoms]);
+
+  useEffect(() => {
+    if (!momLeadId) { setMomLeadMoms([]); setMomLeadMomsLoading(false); return; }
+    let cancelled = false;
+    setMomLeadMomsLoading(true);
+    getLeadMoms(momLeadId)
+      .then((moms) => { if (!cancelled) setMomLeadMoms(moms || []); })
+      .catch((err) => console.error('Failed to load lead MOMs:', err))
+      .finally(() => { if (!cancelled) setMomLeadMomsLoading(false); });
+    return () => { cancelled = true; };
+  }, [momLeadId]);
+
+  // Opens the lead's MOM workspace as an overlay — no view/tab change, so
+  // closing it (onBack below) returns to exactly whatever was on screen.
+  const handleCreateLeadMom = (lead) => { setMomLeadEditMomId(null); setMomLeadId(lead.id); };
+  // Reopening an already-created MOM (the "MoM Created" pill) — same overlay,
+  // but tells MomWorkspace which saved draft to load straight into edit mode.
+  const handleEditLeadMom = (lead) => { setMomLeadEditMomId(lead.momId || null); setMomLeadId(lead.id); };
+  const closeMomLeadOverlay = () => { setMomLeadId(null); setMomLeadEditMomId(null); };
 
   // Whenever either a goals-view client, an asset-allocation-view client, a profile-view client,
   // an MOM-view client, or a proposal-view client is open, we're "inside" a single client's profile — swap the main tab
@@ -190,7 +592,25 @@ export default function App() {
     goToClientProfile(clientId);
   };
 
+  // From the client search dropdown's "Applicants" results — open the
+  // owning Group Leader's profile and scroll/highlight that specific
+  // family member in the Family & Applicants Details table.
+  const goToApplicant = (clientId, applicant) => {
+    setHighlightApplicant({ clientId, pan: applicant?.pan || '', name: applicant?.name || '' });
+    goToClientProfile(clientId);
+  };
+
   const handleOpenTask = (task) => {
+    // COBR tasks (relatedTo: 'COBR') open the specialized checklist editor even
+    // when opened from the Tasks module / dashboard / a profile task list —
+    // the interactive Mark Done/Rejected checklist lives HERE (the working
+    // view), not the generic Task form. Reopen stays COBR-module-only.
+    if (task && task.relatedTo === 'COBR') {
+      setEditingCobr(task);
+      setCobrInteractive(true);
+      setCobrAllowReopen(false);
+      return;
+    }
     setEditingTask(task);
     setShowTaskForm(true);
   };
@@ -204,6 +624,73 @@ export default function App() {
     saveTasks(updatedTasks);
     setShowTaskForm(false);
     setEditingTask(null);
+    setTasksChangeCounter(prev => prev + 1);
+    // If this is a lead's Initial Call task and it's now Completed (Won),
+    // advance the linked lead Qualified → Connected.
+    if (task.leadId && task.stage === 'Completed' && task.otherSpecify === 'Initial Call') {
+      const lastComment = (task.comments || []).slice(-1)[0]?.text || '';
+      markConnectedFromTask(task.leadId, lastComment, getCurrentUser()?.name || 'System');
+      setLeadsChangeCounter(prev => prev + 1);
+    }
+  };
+
+  const handleOpenQuery = (q) => {
+    setEditingQuery(q);
+    setShowQueryForm(true);
+  };
+
+  // `pendingAttachments` are files picked while RAISING a query: they can only
+  // be attached once the query row exists server-side (they hang off it), so
+  // they're uploaded here after the save has landed rather than in the modal,
+  // which unmounts as soon as this closes it.
+  const handleSaveQueryGlobal = (q, pendingAttachments = []) => {
+    const allQueries = loadQueries();
+    const exists = allQueries.some(x => x.id === q.id);
+    const updatedQueries = exists
+      ? allQueries.map(x => x.id === q.id ? q : x)
+      : [q, ...allQueries];
+    const saved = saveQueries(updatedQueries);
+    setShowQueryForm(false);
+    setEditingQuery(null);
+    setQueriesChangeCounter(prev => prev + 1);
+
+    if (pendingAttachments.length) {
+      Promise.resolve(saved)
+        .then(() => pendingAttachments.reduce(
+          (chain, file) => chain.then(() => uploadQueryAttachment(q.id, file)),
+          Promise.resolve()
+        ))
+        .then(() => setQueriesChangeCounter(prev => prev + 1))
+        .catch((err) => {
+          console.error('Failed to attach files to the new query:', err);
+          alert('The query was raised, but one or more attachments could not be uploaded. You can attach them again from the query.');
+        });
+    }
+  };
+
+  // COBR (Change of Broker) records are Task rows — same save pipeline as
+  // handleSaveTaskGlobal above, just closing the COBR-specific modal state.
+  // The COBR module opens a READ-ONLY summary (interactive=false) whose only
+  // action is reopen (allowReopen — "we can reopen the cobr task from the cobr
+  // module only"); the interactive Mark Done/Rejected checklist is reached from
+  // the Tasks module via handleOpenTask above.
+  const handleNewCobr = () => setShowCobrForm(true);
+  const handleOpenCobr = (task, allowReopen = false) => {
+    setEditingCobr(task);
+    setCobrInteractive(false);
+    setCobrAllowReopen(allowReopen);
+  };
+  const handleSaveCobr = (task) => {
+    const allTasks = loadTasks();
+    const exists = allTasks.some(t => t.id === task.id);
+    const updatedTasks = exists
+      ? allTasks.map(t => t.id === task.id ? task : t)
+      : [task, ...allTasks];
+    saveTasks(updatedTasks);
+    setShowCobrForm(false);
+    setEditingCobr(null);
+    setCobrAllowReopen(false);
+    setCobrInteractive(true);
     setTasksChangeCounter(prev => prev + 1);
   };
 
@@ -225,6 +712,162 @@ export default function App() {
     setProspectsChangeCounter(prev => prev + 1);
   };
 
+  // Open an existing meeting for edit (from the Meetings module or a profile).
+  // Lock the client field for lead meetings so the name can't be overwritten.
+  const handleOpenMeeting = (meeting) => {
+    setEditingMeeting(meeting);
+    setMeetingFormLocked(!!meeting?.leadId);
+    setShowMeetingForm(true);
+  };
+
+  // Open the meeting form pre-filled for a lead (Connected stage button).
+  const handleOpenLeadMeetingForm = (lead) => {
+    setEditingMeeting({
+      leadId: lead.id,
+      clientName: leadNameOf(lead),
+      assignedTo: teamName(lead.ownerId) || '',
+      title: `Intro Meeting — ${leadNameOf(lead)}`,
+    });
+    setMeetingFormLocked(true);
+    setShowMeetingForm(true);
+  };
+
+  // Schedule a brand-new meeting. When `client` is supplied (from a client
+  // profile), the client field is pre-filled and locked.
+  const handleScheduleMeeting = (client) => {
+    if (client) {
+      setEditingMeeting({ clientId: client.id, clientName: client.name, pan: client.pan });
+      setMeetingFormLocked(true);
+    } else {
+      setEditingMeeting(null);
+      setMeetingFormLocked(false);
+    }
+    setShowMeetingForm(true);
+  };
+
+  const handleSaveMeetingGlobal = (meeting) => {
+    const all = loadMeetings();
+    const exists = all.some(m => m.id === meeting.id);
+    const updated = exists ? all.map(m => m.id === meeting.id ? meeting : m) : [meeting, ...all];
+    saveMeetings(updated);
+    setShowMeetingForm(false);
+    setEditingMeeting(null);
+    setMeetingFormLocked(false);
+    setMeetingsChangeCounter(prev => prev + 1);
+    // Keep a linked lead's stage in sync with its meeting.
+    if (meeting.leadId) {
+      const when = `${meeting.date || ''} ${meeting.time || ''}`.trim();
+      if (meeting.status === 'Completed') syncMeetingToLead(meeting.leadId, 'completed', { mode: meeting.mode, when });
+      else if (meeting.status === 'Scheduled') syncMeetingToLead(meeting.leadId, 'scheduled', { mode: meeting.mode, when });
+      setLeadsChangeCounter(prev => prev + 1);
+    }
+  };
+
+  // Lead → Client conversion: open the New Client form PREFILLED with the
+  // lead's details so the advisor completes the client record. On save the
+  // client is created (status Inactive) and the lead is stamped Converted.
+  const handleConvertLead = (lead) => {
+    setConvertingLead(lead);
+    setEditingClientId(null);
+    setShowAddClient(true);
+  };
+
+
+  // Schedule a meeting from a lead (Online/Offline + date/time) — creates a real
+  // meeting in the Meetings module (carrying leadId) and moves the lead to
+  // Meeting Pending. For Offline meetings a location log is captured.
+  const handleScheduleLeadMeeting = (lead, { mode, date, time, title, location }) => {
+    const id = uid();
+    const meeting = {
+      id, leadId: lead.id, clientId: '', clientName: leadNameOf(lead), pan: lead.pan || '',
+      title: title || `Intro Meeting — ${leadNameOf(lead)}`,
+      date, time, mode: mode || 'Online',
+      link: '', location: mode === 'Offline' ? (location || '') : '',
+      assignedTo: teamName(lead.ownerId) || '', attendees: [], status: 'Scheduled', notes: '',
+      history: [{ at: new Date().toISOString(), by: getCurrentUser()?.name || 'System', action: 'Scheduled', text: `${mode} meeting scheduled from lead` }],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    saveMeetings([meeting, ...loadMeetings()]);
+    setMeetingsChangeCounter(p => p + 1);
+    syncMeetingToLead(lead.id, 'scheduled', { mode, when: `${date} ${time}`.trim() });
+    setLeadsChangeCounter(p => p + 1);
+    // Navigate to Meetings view so the user sees the newly scheduled lead meeting
+    setView('meetings');
+  };
+
+  // Mark a lead's pending meeting as Done → lead moves to Meeting Done.
+  const handleLeadMeetingDone = (lead) => {
+    const all = loadMeetings();
+    const m = all.find(x => x.leadId === lead.id && x.status === 'Scheduled');
+    if (m) {
+      const updated = all.map(x => x.id === m.id ? { ...x, status: 'Completed', updatedAt: new Date().toISOString(), history: [...(x.history || []), { at: new Date().toISOString(), by: getCurrentUser()?.name || 'System', action: 'Completed', text: 'Marked done from lead' }] } : x);
+      saveMeetings(updated);
+      setMeetingsChangeCounter(p => p + 1);
+    }
+    syncMeetingToLead(lead.id, 'completed', {});
+    setLeadsChangeCounter(p => p + 1);
+  };
+
+  // Keep the sidebar "new leads" badge live (count of leads awaiting assignment).
+  useEffect(() => {
+    const recompute = () => setLeadsBadge(loadLeads().filter(l => (l.stage || 'Waiting for Assignment') === 'Waiting for Assignment' && (l.status || 'Active') === 'Active').length);
+    recompute();
+    window.addEventListener('crm:leads-updated', recompute);
+    window.addEventListener('crm:lead-received', recompute);
+    return () => {
+      window.removeEventListener('crm:leads-updated', recompute);
+      window.removeEventListener('crm:lead-received', recompute);
+    };
+  }, [leadsChangeCounter]);
+
+  // Sidebar "pending" count badges — how many open/unfinished items sit in each
+  // module (only what THIS user can see, since the caches are already
+  // server-view-filtered). Recomputed whenever the underlying caches change.
+  useEffect(() => {
+    const TASK_DONE = new Set(['Completed', 'Lost']);
+    const PROSPECT_DONE = new Set(['Close Won', 'Close Lost', 'Policy Issued', 'Policy Rejected']);
+    const QUERY_DONE = new Set(['Resolved', 'Closed']);
+    const recompute = () => {
+      const tasks = loadTasks();
+      setModuleBadges({
+        // COBR rows are tasks too — split them out so each badge counts its own.
+        tasks: tasks.filter(t => t.relatedTo !== 'COBR' && !TASK_DONE.has(t.stage || 'Open')).length,
+        cobr: tasks.filter(t => t.relatedTo === 'COBR' && (t.stage || 'Open') !== 'Completed').length,
+        meetings: loadMeetings().filter(m => (m.status || 'Scheduled') === 'Scheduled').length,
+        prospects: loadProspects().filter(p => !PROSPECT_DONE.has(p.stage)).length,
+        queries: loadQueries().filter(q => !QUERY_DONE.has(q.stage || 'Open')).length,
+      });
+    };
+    recompute();
+    window.addEventListener('crm:tasks-updated', recompute);
+    window.addEventListener('crm:meetings-updated', recompute);
+    window.addEventListener('crm:prospects-updated', recompute);
+    window.addEventListener('crm:queries-updated', recompute);
+    return () => {
+      window.removeEventListener('crm:tasks-updated', recompute);
+      window.removeEventListener('crm:meetings-updated', recompute);
+      window.removeEventListener('crm:prospects-updated', recompute);
+      window.removeEventListener('crm:queries-updated', recompute);
+    };
+  }, [tasksChangeCounter, meetingsChangeCounter, prospectsChangeCounter, queriesChangeCounter]);
+
+  // Leave has no sidebar icon, so its "needs my attention" count is tracked
+  // separately and surfaced in the Account Settings dropdown instead.
+  useEffect(() => {
+    const recompute = () => {
+      if (!canRespondToLeave()) { setPendingLeaveCount(0); return; }
+      const me = getCurrentUser();
+      setPendingLeaveCount(loadLeave().filter((l) => l.status === 'Pending' && l.createdBy !== me?.id).length);
+    };
+    recompute();
+    window.addEventListener('crm:leave-updated', recompute);
+    window.addEventListener('crm:permissions-updated', recompute);
+    return () => {
+      window.removeEventListener('crm:leave-updated', recompute);
+      window.removeEventListener('crm:permissions-updated', recompute);
+    };
+  }, []);
+
   const goToMomMapping = (clientId) => {
     setSelectedClientId(null);
     setSelectedGoalId(null);
@@ -232,8 +875,37 @@ export default function App() {
     setClientProfileId(null);
     setProposalClientId(null);
     setReviewClientId(null);
+    setMomEditMomId(null);
+    setMomSourceMeetingId(null);
     setMomClientId(clientId);
     setTab('mom');
+  };
+
+  // From a completed meeting → jump to that client's MOM (Draft MOM) workspace.
+  // For lead meetings, the meeting's clientId is empty, but if the lead was
+  // converted the lead record carries the resulting clientId — use that.
+  const handleCreateMomFromMeeting = (meeting) => {
+    let clientId = meeting?.clientId;
+    if (!clientId && meeting?.leadId) {
+      const lead = loadLeads().find(l => l.id === meeting.leadId);
+      if (lead?.clientId) clientId = lead.clientId;
+    }
+    if (!clientId || !clients.some(c => c.id === clientId)) {
+      alert('This meeting is not linked to a saved client (or the lead hasn\'t been converted yet), so its MOM workspace can\'t be opened.');
+      return;
+    }
+    setShowMeetingForm(false);
+    setEditingMeeting(null);
+    setMeetingFormLocked(false);
+    setView('clients');
+    goToMomMapping(clientId);
+    if (meeting?.momId) {
+      // A MOM already exists for this meeting — open it in edit mode.
+      setMomEditMomId(meeting.momId);
+    } else {
+      // Fresh draft — remember the meeting so it can be stamped on save.
+      setMomSourceMeetingId(meeting?.id || null);
+    }
   };
 
   const goToProposal = (clientId) => {
@@ -290,9 +962,11 @@ export default function App() {
       const c = calcGoal(g);
       totalAdditional += c.additionalSip;
       totalLump += c.lumpSumRequired;
-      totalCurrentSip += (Number(g.currentSip) || 0);
+      totalCurrentSip += c.todayEffectiveSip;
     });
-    // Total SIP is simply Current SIP + Additional SIP (signed)
+    // Total SIP = what's already going in + what still needs to be added.
+    // `additionalSip` is never negative: an over-funded goal contributes 0
+    // here rather than discounting the top-up other goals genuinely need.
     const totalSip = totalCurrentSip + totalAdditional;
     return { totalSip, totalAdditional, totalLump, totalCurrentSip };
   }, [selectedClient]);
@@ -344,7 +1018,7 @@ export default function App() {
 
   // Operations wrapped in try-catch and reload triggers
   const handleAddClient = async (name, pan, age, clientDetails) => {
-    const newClient = { id: uid(), name, pan, age: Number(age) || 0, clientDetails };
+    const newClient = { id: uid(), name, pan, age: Number(age) || 0, clientDetails, createdAt: new Date().toISOString() };
     try {
       await addClient(newClient);
       await loadData();
@@ -422,25 +1096,234 @@ export default function App() {
     });
     const changes = buildAllocationEdits(prev, merged);
     if (changes.length === 0) return; // nothing actually changed — skip the write
-    const history = [...prev.history, { at: new Date().toISOString(), changes }];
+    const history = [...prev.history, { at: new Date().toISOString(), by: getCurrentUser()?.name || 'System', changes }];
     const assetAllocation = { ...merged, history, updatedAt: new Date().toISOString() };
     await handleUpdateClient(clientId, { assetAllocation });
   };
 
   const handleImportClients = async (rows) => {
+    // Resolve a team-member NAME from the sheet to its account id (managers are
+    // stored as ids for RBAC). Accepts an id verbatim too. Blank if unmatched.
+    const team = loadTeam();
+    const idByName = new Map(team.map(m => [m.name.trim().toLowerCase(), m.id]));
+    const resolveManager = (v) => {
+      if (!v) return '';
+      if (team.some(m => m.id === v)) return v;
+      return idByName.get(String(v).trim().toLowerCase()) || '';
+    };
+    const computeAge = (dob) => {
+      if (!dob) return 0;
+      const d = new Date(dob);
+      if (isNaN(d.getTime())) return 0;
+      const t = new Date();
+      let a = t.getFullYear() - d.getFullYear();
+      const m = t.getMonth() - d.getMonth();
+      if (m < 0 || (m === 0 && t.getDate() < d.getDate())) a--;
+      return a >= 0 ? a : 0;
+    };
+
+    let ok = 0, fail = 0;
     for (const r of rows) {
-      const newClient = { id: uid(), name: r.name, pan: r.pan, age: Number(r.age) || 0 };
-      try {
-        await addClient(newClient);
-      } catch (err) {
-        alert(`Error importing ${r.name}: ${err.message}`);
-      }
+      const mg = r.managers || {};
+      const clientDetails = {
+        mobile: r.mobile || '', email: r.email || '', clientType: r.clientType || '', maritalStatus: r.maritalStatus || '', dob: r.dob || '',
+        address1: r.address1 || '', address2: r.address2 || '', address3: r.address3 || '',
+        country: r.country || 'India', state: r.state || '', city: r.city || '', pinCode: r.pinCode || '',
+        profession: r.profession || '', professionOther: '',
+        relationshipManager: resolveManager(mg.relationshipManager),
+        portfolioManager: resolveManager(mg.portfolioManager),
+        insuranceManager: resolveManager(mg.insuranceManager),
+        serviceManager: resolveManager(mg.serviceManager),
+        owner: resolveManager(mg.owner),
+        operationManager: resolveManager(mg.operationManager),
+        internalManager: resolveManager(mg.internalManager),
+        familyDetails: Array.isArray(r.familyDetails) ? r.familyDetails : [],
+        mutualFunds: r.mutualFunds || 'No', insuranceTerm: r.insuranceTerm || 'No',
+        insuranceMedical: r.insuranceMedical || 'No', insuranceAccidental: r.insuranceAccidental || 'No',
+        status: r.status || 'Active',
+        openActivities: [], closedActivities: [], meetingHistory: [], businessProspects: [], attachments: [], notes: '',
+      };
+      const newClient = { id: uid(), name: r.name, pan: r.pan, age: Number(r.age) || computeAge(r.dob), clientDetails };
+      try { await addClient(newClient); ok++; }
+      catch (err) { fail++; console.error(`Import failed for ${r.name}:`, err); }
     }
     await loadData();
+    if (fail > 0) alert(`Imported ${ok} client(s). ${fail} row(s) failed — see console for details.`);
+  };
+
+  // TEMPORARY admin cleanup — soft-delete every client (batched so a large
+  // directory doesn't fire hundreds of requests at once). Used once to wipe
+  // the wrongly-owner-mapped import before re-importing with correct
+  // owner/RM names. Soft delete leaves the rows with deletedAt set; the PAN
+  // uniqueness check ignores deleted rows, so re-importing the same PANs works.
+  // Returns { done, failed }.
+  const handleDeleteAllClients = async () => {
+    const all = clients.slice();
+    let done = 0, failed = 0;
+    const BATCH = 8;
+    for (let i = 0; i < all.length; i += BATCH) {
+      const results = await Promise.allSettled(all.slice(i, i + BATCH).map((c) => deleteClient(c.id)));
+      for (const r of results) (r.status === 'fulfilled' ? done++ : failed++);
+    }
+    await loadData();
+    return { done, failed };
+  };
+
+  // Re-fetch just the current client directory (used by several module views).
+  const refreshClients = async () => {
+    const data = await getClients();
+    setClients(data);
+  };
+
+  // Which data each module view depends on. Clicking into a module re-pulls
+  // exactly that data — a quick, targeted refresh (not a full app reload) — so
+  // items created by other users since login show up without a manual refresh.
+  const MODULE_REFRESHERS = {
+    dashboard: () => Promise.all([hydrateTasks(), hydrateProspects(), hydrateMeetings(), hydrateLeads(), refreshClients()]),
+    leads: hydrateLeads,
+    clients: refreshClients,
+    documents: refreshClients,
+    tasks: hydrateTasks,
+    cobr: hydrateTasks,
+    queries: hydrateQueries,
+    leave: hydrateLeave,
+    meetings: hydrateMeetings,
+    prospects: hydrateProspects,
+    profile: () => Promise.all([refreshClients(), hydrateTasks(), hydrateProspects(), hydrateMeetings()]),
+    myprofile: hydrateAdvisorProfile,
+  };
+
+  // Run a module's refreshers and return the promise (no spinner). Shared by
+  // the on-click refresh and the silent background auto-refresh below.
+  const runModuleRefreshers = (targetView) => {
+    const job = MODULE_REFRESHERS[targetView];
+    return job ? Promise.resolve().then(job) : Promise.resolve();
+  };
+
+  // Fire-and-forget a targeted refresh for a module, toggling the small dock
+  // spinner. Failures keep the last-known data (never blanks the screen).
+  const refreshModuleData = (targetView) => {
+    if (!MODULE_REFRESHERS[targetView]) return;
+    setRefreshingModule(true);
+    runModuleRefreshers(targetView)
+      .catch((err) => console.error(`Failed to refresh ${targetView}:`, err))
+      .finally(() => setRefreshingModule(false));
+  };
+
+  const handleSetView = (newView) => {
+    setView(newView);
+    if (newView === 'prospects') {
+      setProspectQuery('');
+    }
+    // Pull fresh data for the module we're navigating into (also covers
+    // notification clicks, which route through here).
+    refreshModuleData(newView);
+  };
+
+  // Auto-refresh the module you're CURRENTLY sitting on, so data created by
+  // other users (a task/query/prospect assigned to you, etc.) shows up on its
+  // own — no click away-and-back needed. Silent (no spinner) so it's
+  // unobtrusive; paused while the tab is backgrounded (and fires immediately
+  // when you switch back to the tab) to avoid needless polling. This is the
+  // reliable, socket-independent path — it works even when the live socket
+  // doesn't.
+  useEffect(() => {
+    if (!authed) return undefined;
+    if (!MODULE_REFRESHERS[view]) return undefined;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || document.visibilityState === 'hidden') return;
+      runModuleRefreshers(view).catch(() => { /* keep last data */ });
+    };
+    const id = setInterval(tick, 12000);
+    const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, view]);
+
+  // Auto-refresh the permission matrix itself, same pattern as module data
+  // above. Without this, the matrix is fetched once at login (hydratePermissions
+  // in loadData) and never again — if an admin edits a role's access afterwards,
+  // anyone already logged in keeps enforcing the stale rule (client gating AND
+  // syncBulk both read whatever this tab last fetched) until they manually
+  // reload. That's exactly the kind of bug that looks like it "randomly" comes
+  // back: the matrix gets corrected, but already-open sessions don't know.
+  useEffect(() => {
+    if (!authed) return undefined;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || document.visibilityState === 'hidden') return;
+      hydratePermissions().catch(() => { /* keep last matrix */ });
+    };
+    const id = setInterval(tick, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [authed]);
+
+  // Setter for each module's "open this specific record" deep-link state —
+  // each view already knows how to consume its own activeXId prop (find the
+  // record once loaded, open its modal, then reset the id back to null).
+  const ACTIVE_ID_SETTERS = {
+    tasks: setActiveTaskId,
+    cobr: setActiveCobrId,
+    queries: setActiveQueryId,
+    meetings: setActiveMeetingId,
+    prospects: setActiveProspectId,
+    leads: setActiveLeadId,
+    leave: setActiveLeaveId,
+  };
+
+  // Clicking a notification (in the panel or a toast) marks it read, jumps to
+  // the relevant module, and opens the specific record it's about.
+  const handleOpenNotification = (n) => {
+    setActiveDropdown(null);
+    const link = n?.link;
+    // A chat push (OS notification for a message received while offline) deep-
+    // links straight into that conversation. Its id is the tag ("chat-<id>"),
+    // not a real bell-notification row, so don't try to mark it read.
+    if (link?.view === 'chat' && link.conversationId) {
+      setPendingChatOpen({ conversationId: link.conversationId, messageId: link.messageId || null });
+      setView('chat');
+      return;
+    }
+    if (n?.id) markNotificationRead(n.id);
+    if (!link?.view) return;
+    const setActiveId = ACTIVE_ID_SETTERS[link.view];
+    if (link.id && setActiveId) setActiveId(link.id);
+    handleSetView(link.view);
+  };
+
+  const handleNavDoubleClick = async (id) => {
+    if (id === 'clients') {
+      try {
+        setSelectedClientId(null);
+        setSelectedGoalId(null);
+        setSelectedGoalName(null);
+        setAssetClientId(null);
+        setMomClientId(null);
+        setClientProfileId(null);
+        setProposalClientId(null);
+        setReviewClientId(null);
+        setTab('clients');
+        await loadData();
+      } catch (err) {
+        console.error('Failed to reload fresh client directory:', err);
+      }
+    }
   };
 
   if (!authed) {
-    return <Login onLogin={handleLogin} />;
+    return <Login onLogin={handleLogin} theme={theme} setTheme={setTheme} />;
   }
 
   if (!loaded) {
@@ -454,29 +1337,380 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex bg-slate-50/40 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 antialiased font-sans">
-      <Sidebar
+      {/* On-screen toast previews (business notifications + new-chat popups) */}
+      <NotificationToaster
         view={view}
-        setView={setView}
-        theme={theme}
-        setTheme={setTheme}
-        onLogout={handleLogout}
+        onOpen={handleOpenNotification}
+        onOpenChat={() => { setActiveDropdown(null); setView('chat'); }}
+        onBellShake={() => triggerAnim('bell')}
       />
+      <InstallPrompt />
+      {view !== 'chat' && (
+        <Sidebar
+          view={view}
+          setView={handleSetView}
+          onNavDoubleClick={handleNavDoubleClick}
+          badges={{ leads: leadsBadge, chat: chatUnread, tasks: moduleBadges.tasks, cobr: moduleBadges.cobr, meetings: moduleBadges.meetings, prospects: moduleBadges.prospects, queries: moduleBadges.queries }}
+          othersSubTab={othersSubTab}
+          onSelectOthersTab={setOthersSubTab}
+        />
+      )}
 
-      <div className="flex-1 min-w-0 flex flex-col min-h-screen relative">
-        {view === 'leads' && (
-          <main className="max-w-7xl w-full mx-auto px-6 py-8">
-            <div className="flex flex-col items-center justify-center text-center py-24 animate-fade-in">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 mb-5">
-                <UserPlus size={28} />
+      <div className={`flex-1 min-w-0 flex flex-col min-h-screen relative ${view === 'chat' ? 'pt-0' : 'pt-14'}`}>
+        {/* Top Right Floating Trapezoid Dock */}
+        {view !== 'chat' && (
+          <div className="no-print fixed top-0 right-12 z-30 flex flex-col items-end filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.06)] dark:drop-shadow-[0_4px_16px_rgba(0,0,0,0.25)]">
+            <div 
+              style={{
+                clipPath: 'polygon(0 0, 100% 0, 89% 82%, 87% 92%, 84% 100%, 16% 100%, 13% 92%, 11% 82%)'
+              }}
+              className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-x border-slate-200/20 dark:border-slate-800/40 pl-9 pr-9 py-2.5 flex items-center gap-5.5"
+            >
+              {/* Module-refresh spinner — a small circle that spins briefly
+                  while the module we just navigated into re-pulls its data.
+                  Space is reserved always so it never shifts the dock layout. */}
+              <div className="w-4 h-4 flex items-center justify-center shrink-0" title="Refreshing latest data…">
+                <div className={`w-4 h-4 rounded-full border-2 border-blue-500/70 border-t-transparent transition-opacity duration-200 ${refreshingModule ? 'opacity-100 animate-spin' : 'opacity-0'}`} />
               </div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Leads</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-sm">This section is coming soon — lead capture and pipeline management will live here.</p>
+
+              {/* Chat Icon Button — hover for an unread-messages preview,
+                  click to open the full Chat module as before. */}
+              <button
+                onClick={() => {
+                  triggerAnim('chat');
+                  setActiveDropdown(null);
+                  setChatPreviewOpen(false);
+                  setView('chat');
+                  setShowChatSplash(true);
+                  setTimeout(() => {
+                    setShowChatSplash(false);
+                  }, 1800);
+                }}
+                onMouseEnter={() => {
+                  clearTimeout(chatPreviewCloseTimer.current);
+                  setChatPreviewOpen(true);
+                }}
+                onMouseLeave={() => {
+                  chatPreviewCloseTimer.current = setTimeout(() => setChatPreviewOpen(false), 250);
+                }}
+                className={`p-1.5 transition-all duration-300 relative cursor-pointer text-slate-500 dark:text-slate-400
+                  hover:scale-125 hover:text-blue-600 dark:hover:text-blue-400 hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]
+                  ${view === 'chat' ? 'text-blue-600 dark:text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)] scale-110' : ''}
+                  ${activeAnim.chat ? 'animate-chat-bounce' : ''}`}
+                title="Chat"
+              >
+                <MessageSquare size={19} />
+                {chatUnread > 0 && (
+                  <span className="absolute -top-0.5 -right-1 min-w-[15px] h-[15px] px-1 flex items-center justify-center text-[8px] font-black rounded-full bg-blue-600 text-white ring-2 ring-white dark:ring-slate-900">
+                    {chatUnread > 9 ? '9+' : chatUnread}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Bell Button */}
+              <button
+                onClick={() => handleToolbarClick('bell')}
+                className={`p-1.5 transition-all duration-300 relative cursor-pointer text-slate-500 dark:text-slate-400
+                  hover:scale-125 hover:text-amber-500 dark:hover:text-amber-400 hover:drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]
+                  ${activeDropdown === 'bell' ? 'text-amber-500 dark:text-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)] scale-110' : ''}
+                  ${activeAnim.bell ? 'animate-bell-ring' : ''}`}
+                title="Notifications"
+              >
+                <Bell size={19} />
+                {notifications.length > 0 && (
+                  <span className="absolute -top-0.5 -right-1 min-w-[15px] h-[15px] px-1 flex items-center justify-center text-[8px] font-black rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
+                    {notifications.length > 9 ? '9+' : notifications.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Profile Avatar Button */}
+              <button
+                onClick={() => handleToolbarClick('profile')}
+                className={`w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shadow-sm border border-blue-500/20 transition-all duration-300 cursor-pointer shrink-0 relative overflow-hidden
+                  hover:scale-115 active:scale-95 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_12px_rgba(59,130,246,0.3)]
+                  ${activeAnim.profile ? 'animate-profile-pop' : ''}`}
+                title="Advisor Profile"
+              >
+                {advisorProfile.photo ? (
+                  <img src={advisorProfile.photo} alt={advisorProfile.name} className="w-full h-full object-cover" />
+                ) : (
+                  initials(advisorProfile.name || 'NL')
+                )}
+              </button>
             </div>
+
+            {/* Chat unread-messages hover preview */}
+            {chatPreviewOpen && (
+              <div
+                className="absolute top-11 right-24 w-80 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/80 shadow-2xl z-45 animate-scale-up p-4 mt-2 text-left"
+                onMouseEnter={() => clearTimeout(chatPreviewCloseTimer.current)}
+                onMouseLeave={() => {
+                  chatPreviewCloseTimer.current = setTimeout(() => setChatPreviewOpen(false), 250);
+                }}
+              >
+                <ChatHoverPreview
+                  conversations={chatConversationsPreview}
+                  usersById={chatUsersById}
+                  me={getCurrentUser()}
+                  online={new Set()}
+                  onOpen={(conversationId, messageId) => {
+                    setChatPreviewOpen(false);
+                    setPendingChatOpen({ conversationId, messageId });
+                    triggerAnim('chat');
+                    setActiveDropdown(null);
+                    setView('chat');
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Dropdown Popovers - Outside the clipped dock */}
+            {activeDropdown === 'bell' && (
+              <div className="absolute top-11 right-10 w-80 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/80 shadow-2xl z-45 animate-scale-up p-4 mt-2 text-left">
+                <NotificationPanel
+                  notifications={notifications}
+                  onMarkRead={markNotificationRead}
+                  onMarkAllRead={markAllNotificationsRead}
+                  onOpen={handleOpenNotification}
+                />
+              </div>
+            )}
+
+            {/* Profile Dropdown */}
+            {activeDropdown === 'profile' && (
+              <div className="absolute top-11 right-0 w-64 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/80 shadow-2xl z-45 animate-scale-up p-4 mt-2 text-left">
+                <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 mb-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0 overflow-hidden">
+                    {advisorProfile.photo ? (
+                      <img src={advisorProfile.photo} alt={advisorProfile.name} className="w-full h-full object-cover" />
+                    ) : (
+                      initials(advisorProfile.name || 'NL')
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">{advisorProfile.name || getCurrentUser()?.name || 'User'}</h4>
+                    <p className="text-[9px] text-slate-450 dark:text-slate-500 truncate font-semibold">{advisorProfile.email || 'nitesh@teamfintness.com'}</p>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="px-3 py-2 text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase tracking-widest">
+                    Account and General Settings
+                  </div>
+                  <button
+                    onClick={() => { setActiveDropdown(null); setView('myprofile'); }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                  >
+                    Profile Settings
+                  </button>
+                  <button
+                    onClick={() => { setActiveDropdown(null); setView('leave'); }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                  >
+                    <span>Leave</span>
+                    {pendingLeaveCount > 0 && (
+                      <span className="text-[9px] font-black text-white bg-amber-500 rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">
+                        {pendingLeaveCount > 99 ? '99+' : pendingLeaveCount}
+                      </span>
+                    )}
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setActiveDropdown(null); setView('users'); }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                    >
+                      <span>User Management</span>
+                      <span className="text-[8px] font-bold bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 ml-1.5 px-1.5 py-0.5 rounded uppercase tracking-wider">Admin</span>
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setActiveDropdown(null); setView('permissions'); }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                    >
+                      <span>Permission Matrix</span>
+                      <span className="text-[8px] font-bold bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 ml-1.5 px-1.5 py-0.5 rounded uppercase tracking-wider">Admin</span>
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setActiveDropdown(null); setView('activity-log'); }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                    >
+                      <span>Activity Log</span>
+                      <span className="text-[8px] font-bold bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 ml-1.5 px-1.5 py-0.5 rounded uppercase tracking-wider">Admin</span>
+                    </button>
+                  )}
+                  <button className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all">
+                    Preferences <span className="text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-550 ml-1.5 px-1 py-0.5 rounded">Soon</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveDropdown(null); setShowChangePassword(true); }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                  >
+                    Change Password
+                  </button>
+                  <div className="border-t border-slate-100 dark:border-slate-800 my-2" />
+                  <button
+                    onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                  >
+                    <span>Theme Mode</span>
+                    {theme === 'dark' ? <Sun size={14} className="text-amber-500" /> : <Moon size={14} className="text-slate-400" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveDropdown(null);
+                      handleLogout();
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-455 hover:bg-rose-50 dark:hover:bg-rose-955/20 cursor-pointer transition-all"
+                  >
+                    <span>Sign Out</span>
+                    <LogOut size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Global Transparent Click Handler to close dropdowns */}
+        {activeDropdown && (
+          <div className="fixed inset-0 z-10" onClick={() => setActiveDropdown(null)} />
+        )}
+
+        {view === 'dashboard' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <DashboardView
+              clients={clients}
+              advisorName={advisorProfile.name}
+              tasksChangeCounter={tasksChangeCounter}
+              prospectsChangeCounter={prospectsChangeCounter}
+              meetingsChangeCounter={meetingsChangeCounter}
+              setView={handleSetView}
+              onNewClient={() => { setEditingClientId(null); setShowAddClient(true); }}
+              onNewMeeting={() => { setEditingMeeting(null); setShowMeetingForm(true); }}
+              onNewTask={() => { setEditingTask(null); setShowTaskForm(true); }}
+              onOpenTask={handleOpenTask}
+              onOpenMeeting={handleOpenMeeting}
+              onOpenProspect={handleOpenProspect}
+            />
+          </main>
+        )}
+
+        {view === 'myprofile' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <MyProfileView />
+          </main>
+        )}
+
+        {view === 'leave' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <LeaveView activeLeaveId={activeLeaveId} setActiveLeaveId={setActiveLeaveId} />
+          </main>
+        )}
+
+        {view === 'users' && isAdmin && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <UsersAdmin />
+          </main>
+        )}
+
+        {view === 'activity-log' && isAdmin && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <ActivityLogView />
+          </main>
+        )}
+
+        {view === 'permissions' && isAdmin && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <PermissionsMatrix />
+          </main>
+        )}
+
+        {view === 'chat' && (
+          <div className="w-full flex-1 flex select-none bg-slate-50 dark:bg-slate-950">
+            {showChatSplash ? (
+              <div className="fixed inset-0 z-50 flex flex-col items-center justify-between bg-slate-50 dark:bg-slate-950 transition-colors duration-300 animate-fade-in pb-12 pt-24">
+                <div />
+                <div className="flex flex-col items-center gap-4">
+                  <img
+                    src={logoImg}
+                    className="w-20 h-20 object-contain rounded-2xl shadow-xl ring-2 ring-blue-500/20 dark:ring-blue-500/10 animate-bounce-subtle"
+                    alt="Team Fintness"
+                  />
+                  <h2 className="text-xl font-extrabold tracking-tight text-slate-800 dark:text-slate-100 font-heading">
+                    Fintness Chat
+                  </h2>
+                  <div className="w-36 h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden mt-4">
+                    <div className="h-full bg-blue-600 rounded-full animate-loading-bar" />
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-1.5 animate-slide-up">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    from
+                  </span>
+                  <span className="text-sm font-black tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent uppercase">
+                    fintness finserv
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <ChatSidebar
+                  advisorProfile={advisorProfile}
+                  isAdmin={isAdmin}
+                  theme={theme}
+                  setTheme={setTheme}
+                  onLogout={handleLogout}
+                  setShowChangePassword={setShowChangePassword}
+                  activeDropdown={activeDropdown}
+                  setActiveDropdown={setActiveDropdown}
+                  setView={setView}
+                  pendingLeaveCount={pendingLeaveCount}
+                  notifications={notifications}
+                  onMarkRead={markNotificationRead}
+                  onMarkAllRead={markAllNotificationsRead}
+                  onOpenNotification={handleOpenNotification}
+                />
+                <div className="flex-1 min-w-0 h-screen flex flex-col">
+                  <ChatView
+                    onQuickAction={(action) => {
+                      if (action === 'task') { setEditingTask(null); setShowTaskForm(true); }
+                      else if (action === 'meeting') setView('meetings');
+                      else if (action === 'lead') setView('leads');
+                      else if (action === 'client') setView('clients');
+                      else if (action === 'dash') setView('dashboard');
+                    }}
+                    initialConversationId={pendingChatOpen?.conversationId}
+                    initialMessageId={pendingChatOpen?.messageId}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {view === 'leads' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <LeadsView
+              isViewer={isViewer}
+              clients={clients}
+              leadsChangeCounter={leadsChangeCounter}
+              onConvertLead={handleConvertLead}
+              onScheduleLeadMeeting={handleScheduleLeadMeeting}
+              onLeadMeetingDone={handleLeadMeetingDone}
+              onOpenLeadMeetingForm={handleOpenLeadMeetingForm}
+              onCreateLeadMom={handleCreateLeadMom}
+              onEditLeadMom={handleEditLeadMom}
+              activeLeadId={activeLeadId}
+              setActiveLeadId={setActiveLeadId}
+            />
           </main>
         )}
 
         {view === 'tasks' && (
-          <main className="max-w-7xl w-full mx-auto px-6 py-8">
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
             <TasksView 
               clients={clients} 
               isViewer={isViewer} 
@@ -488,20 +1722,85 @@ export default function App() {
           </main>
         )}
 
+        {view === 'cobr' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <CobrView
+              isViewer={isViewer}
+              tasksChangeCounter={tasksChangeCounter}
+              onNewCobr={handleNewCobr}
+              onOpenCobr={handleOpenCobr}
+              activeCobrId={activeCobrId}
+              setActiveCobrId={setActiveCobrId}
+            />
+          </main>
+        )}
+
+        {view === 'meetings' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <MeetingsView
+              clients={clients}
+              isViewer={isViewer}
+              onOpenMeeting={handleOpenMeeting}
+              onScheduleMeeting={handleScheduleMeeting}
+              onCreateMom={handleCreateMomFromMeeting}
+              meetingsChangeCounter={meetingsChangeCounter}
+              activeMeetingId={activeMeetingId}
+              setActiveMeetingId={setActiveMeetingId}
+            />
+          </main>
+        )}
+
         {view === 'documents' && (
-          <main className="max-w-7xl w-full mx-auto px-6 py-8">
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
             <DocumentsView clients={clients} />
           </main>
         )}
 
+        {view === 'queries' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <QueriesView
+              isViewer={isViewer}
+              activeQueryId={activeQueryId}
+              setActiveQueryId={setActiveQueryId}
+              onOpenQuery={handleOpenQuery}
+              queriesChangeCounter={queriesChangeCounter}
+            />
+          </main>
+        )}
+
         {view === 'prospects' && (
-          <main className="max-w-7xl w-full mx-auto px-6 py-8">
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
             <ProspectsView
               isViewer={isViewer}
               onOpenProspect={handleOpenProspect}
               prospectsChangeCounter={prospectsChangeCounter}
               activeProspectId={activeProspectId}
               setActiveProspectId={setActiveProspectId}
+              clients={clients}
+              initialQuery={prospectQuery}
+            />
+          </main>
+        )}
+
+        {view === 'reports' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <div className="flex flex-col items-center justify-center text-center py-24 animate-fade-in">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 mb-5">
+                <TrendingUp size={28} />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Reports</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-sm">This section is coming soon — advanced reports and data exports will live here.</p>
+            </div>
+          </main>
+        )}
+
+        {view === 'others' && (
+          <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
+            <OthersView
+              clients={clients}
+              isViewer={isViewer}
+              subTab={othersSubTab}
+              onSubTabChange={setOthersSubTab}
             />
           </main>
         )}
@@ -509,7 +1808,7 @@ export default function App() {
         {view === 'clients' && (
         <>
       {/* Main Container */}
-      <main className="max-w-7xl w-full mx-auto px-6 py-8">
+      <main className="max-w-7xl w-full mx-auto px-6 pt-4 pb-8">
         {/* Global Summary Statistics Dashboard */}
         {!inClientProfile && !selectedGoalName && (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6 animate-fade-in">
@@ -647,8 +1946,10 @@ export default function App() {
               clients={clients}
               onSelect={goToClientProfile}
               onSelectFreshly={goToClientProfileFreshly}
+              onSelectApplicant={goToApplicant}
               onAdd={() => setShowAddClient(true)}
               onDelete={handleDeleteClient}
+              onDeleteAll={handleDeleteAllClients}
               onImport={() => setShowImportExcel(true)}
               isViewer={isViewer}
             />
@@ -677,12 +1978,15 @@ export default function App() {
               clientName={selectedClient.name}
               onBack={() => setSelectedGoalId(null)}
               onEdit={() => { setEditingGoalId(selectedGoalId); setShowGoalForm(true); }}
-              onSaveActuals={(actuals, changes) => {
+              onSaveContributions={(contributions, changes) => {
                 const prevHistory = Array.isArray(selectedGoal?.history) ? selectedGoal.history : [];
                 const history = (changes && changes.length)
-                  ? [...prevHistory, { at: new Date().toISOString(), changes }]
+                  ? [...prevHistory, { at: new Date().toISOString(), by: getCurrentUser()?.name || 'System', changes }]
                   : prevHistory;
-                handleUpdateGoal(selectedClientId, selectedGoalId, { actuals, history });
+                // Saving the log forward in the typed shape also retires the
+                // legacy `actuals` rows this goal may have been read from, so
+                // the two never coexist and get double-counted.
+                handleUpdateGoal(selectedClientId, selectedGoalId, { contributions, actuals: [], history });
               }}
               isViewer={isViewer}
             />
@@ -729,19 +2033,30 @@ export default function App() {
               client={profileClient}
               clients={clients}
               onEditClient={() => { setEditingClientId(clientProfileId); setShowAddClient(true); }}
+              onDeleteClient={() => handleDeleteClient(clientProfileId)}
               isViewer={isViewer}
+              highlightApplicant={highlightApplicant?.clientId === clientProfileId ? highlightApplicant : null}
               onNavigateToTasks={(taskId) => {
                 setView('tasks');
                 setActiveTaskId(taskId);
               }}
               onOpenTask={handleOpenTask}
               tasksChangeCounter={tasksChangeCounter}
-              onNavigateToProspects={(prospectId) => {
+              onOpenCobr={(task) => handleOpenCobr(task, false)}
+              onNavigateToProspects={(prospectId, clientName) => {
                 setView('prospects');
+                setProspectQuery(clientName || '');
                 setActiveProspectId(prospectId);
               }}
               onOpenProspect={handleOpenProspect}
               prospectsChangeCounter={prospectsChangeCounter}
+              onScheduleMeeting={handleScheduleMeeting}
+              onOpenMeeting={handleOpenMeeting}
+              meetingsChangeCounter={meetingsChangeCounter}
+              onNavigateToMeetings={(meetingId) => {
+                setView('meetings');
+                setActiveMeetingId(meetingId);
+              }}
             />
           </div>
         )}
@@ -751,15 +2066,18 @@ export default function App() {
             <MomWorkspace
               client={momClient}
               onBack={backToClients}
+              initialEditMomId={momEditMomId}
+              sourceMeetingId={momSourceMeetingId}
             />
           </div>
         )}
 
         {tab === 'review' && reviewClientId && reviewClient && (
           <div className="animate-scale-up">
-            <PolicyReview
+            <ReviewWorkspace
               client={reviewClient}
-              onBack={backToClients}
+              subTab={reviewSubTab}
+              setSubTab={setReviewSubTab}
             />
           </div>
         )}
@@ -789,29 +2107,63 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="max-w-7xl w-full mx-auto px-6 py-10 text-xs text-slate-400 dark:text-slate-500 text-center border-t border-slate-200/40 dark:border-slate-800/40 mt-12">
-        © {CURRENT_YEAR} Team Fintness · Building fitter financial futures
-      </footer>
         </>
         )}
+
+      {/* Footer */}
+      {view !== 'chat' && (
+        <footer className="max-w-7xl w-full mx-auto px-6 py-10 text-xs text-slate-400 dark:text-slate-500 text-center border-t border-slate-200/40 dark:border-slate-800/40 mt-12">
+          © {CURRENT_YEAR} Team Fintness · Building fitter financial futures
+        </footer>
+      )}
       </div>
 
       {/* Modals */}
       {showAddClient && (
-        <ClientFormModal 
-          initial={editingClientId ? clients.find(c => c.id === editingClientId) : null}
-          onClose={() => { setShowAddClient(false); setEditingClientId(null); }} 
+        <ClientFormModal
+          initial={editingClientId ? clients.find(c => c.id === editingClientId) : (convertingLead ? clientPayloadFromLead(convertingLead) : null)}
+          clients={clients}
+          autosaveKey={convertingLead ? `lead-${convertingLead.id}` : undefined}
+          onClose={() => { setShowAddClient(false); setEditingClientId(null); setConvertingLead(null); }}
           onSave={async (name, pan, age, clientDetails) => {
             if (editingClientId) {
               await handleUpdateClient(editingClientId, { name, pan, age: Number(age) || 0, clientDetails });
+            } else if (convertingLead) {
+              // Lead → Client: create the client, link it back to the lead, mark
+              // the lead Converted, then open the new client's profile.
+              const newId = uid();
+              try {
+                await addClient({ id: newId, name, pan, age: Number(age) || 0, clientDetails, createdAt: new Date().toISOString() });
+                updateLead(convertingLead.id, { stage: 'Converted', clientId: newId }, advisorProfile.name || getCurrentUser()?.name || 'System');
+                // Carry the lead's MOM (if it drafted one) over to the new
+                // client so it shows up in Draft MOM there. AWAITED (not
+                // fire-and-forget) so the loadData() below reflects the
+                // reparented MOM immediately — otherwise loadData() could
+                // race ahead of the reparent finishing, leaving the client's
+                // freshly-loaded .moms empty and causing the next MOM to
+                // wrongly restart at Meeting #1 instead of continuing from
+                // the lead's existing meeting count. Still non-fatal: a
+                // reparent failure doesn't block the conversion, which has
+                // already succeeded.
+                try {
+                  await reparentLeadMoms(convertingLead.id, newId);
+                } catch (err) {
+                  console.error('Failed to move lead MOM to new client:', err);
+                }
+                await loadData();
+                setLeadsChangeCounter(c => c + 1);
+                setView('clients');
+                goToClientProfile(newId);
+              } catch (err) {
+                alert('Conversion failed — the lead stays at Meeting Done. ' + err.message);
+              }
             } else {
               await handleAddClient(name, pan, age, clientDetails);
             }
             setShowAddClient(false);
             setEditingClientId(null);
-          }} 
+            setConvertingLead(null);
+          }}
         />
       )}
       
@@ -819,6 +2171,7 @@ export default function App() {
         <ExcelImportModal
           onClose={() => setShowImportExcel(false)}
           onImport={handleImportClients}
+          clients={clients}
         />
       )}
 
@@ -837,6 +2190,8 @@ export default function App() {
       {showGoalForm && selectedClient && (
         <GoalFormModal
           initial={editingGoalId ? selectedClient.goals.find(g => g.id === editingGoalId) : null}
+          assetAllocation={selectedClient.assetAllocation}
+          clientGoals={selectedClient.goals || []}
           onClose={() => { setShowGoalForm(false); setEditingGoalId(null); }}
           onSave={(g) => {
             if (editingGoalId) {
@@ -844,7 +2199,7 @@ export default function App() {
               const changes = prev ? buildGoalEdits(prev, g) : [];
               const prevHistory = Array.isArray(prev?.history) ? prev.history : [];
               const history = changes.length
-                ? [...prevHistory, { at: new Date().toISOString(), changes }]
+                ? [...prevHistory, { at: new Date().toISOString(), by: getCurrentUser()?.name || 'System', changes }]
                 : prevHistory;
               handleUpdateGoal(selectedClient.id, editingGoalId, { ...g, history });
             } else {
@@ -866,14 +2221,274 @@ export default function App() {
         />
       )}
 
+      {showQueryForm && (
+        <QueryFormModal
+          initial={editingQuery}
+          isViewer={isViewer}
+          onClose={() => { setShowQueryForm(false); setEditingQuery(null); }}
+          onSave={handleSaveQueryGlobal}
+        />
+      )}
+
+      {showCobrForm && (
+        <CobrFormModal
+          clients={clients}
+          onClose={() => setShowCobrForm(false)}
+          onSave={handleSaveCobr}
+        />
+      )}
+
+      {editingCobr && (
+        <CobrTaskModal
+          task={editingCobr}
+          interactive={cobrInteractive}
+          allowReopen={cobrAllowReopen}
+          onClose={() => { setEditingCobr(null); setCobrAllowReopen(false); setCobrInteractive(true); }}
+          onSave={handleSaveCobr}
+        />
+      )}
+
+      {showChangePassword && (
+        <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
+      )}
+
       {showProspectForm && editingProspect && (
         <ProspectModal
           mode="edit"
           initial={editingProspect}
+          clients={clients}
+          isViewer={isViewer}
           onClose={() => { setShowProspectForm(false); setEditingProspect(null); }}
           onConfirm={handleSaveProspectGlobal}
         />
       )}
+
+      {showMeetingForm && (
+        <MeetingFormModal
+          initial={editingMeeting}
+          clients={clients}
+          isViewer={isViewer}
+          lockClient={meetingFormLocked}
+          onCreateMom={handleCreateMomFromMeeting}
+          onClose={() => { setShowMeetingForm(false); setEditingMeeting(null); setMeetingFormLocked(false); }}
+          onSave={handleSaveMeetingGlobal}
+        />
+      )}
+
+      {/* Lead-side MOM workspace — a full-screen overlay, not a view/tab
+          change, so closing it returns to exactly whatever was on screen
+          underneath (the Leads list/detail), no redirect. MomWorkspace's own
+          `onBack` isn't wired to a visible control in the client-profile flow
+          (you leave by clicking a different top tab there), so this overlay
+          supplies its own floating close button. Staying on the workspace
+          after saving (rather than swapping it out) keeps the Save & Generate
+          MOM Draft / print / save-document actions reachable — leaving is the
+          advisor's own call via this button. */}
+      {momLeadId && momLeadSubject && (
+        <div className="fixed inset-0 z-50 bg-slate-50 dark:bg-slate-950 overflow-y-auto animate-fade-in">
+          <button
+            onClick={closeMomLeadOverlay}
+            className="fixed top-4 right-4 z-[60] flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+          >
+            <X size={14} /> Close &amp; Back to Lead
+          </button>
+          {/* pt-20 (not the usual pt-4) — the floating close button above is
+              `fixed`, so it doesn't reserve any layout space; without extra
+              clearance here the "Saved MOM Drafts" panel and wizard tab bar
+              render right underneath it and visually collide. */}
+          <div className="max-w-7xl w-full mx-auto px-6 pt-20 pb-8">
+            {momLeadMomsLoading ? (
+              <div className="flex items-center justify-center py-24 text-slate-400 dark:text-slate-500 text-sm font-semibold">
+                Loading…
+              </div>
+            ) : (
+              <MomWorkspace
+                client={momLeadSubject}
+                subjectType="lead"
+                onBack={closeMomLeadOverlay}
+                initialEditMomId={momLeadEditMomId}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ChatSidebar({
+  advisorProfile, isAdmin, theme, setTheme, onLogout,
+  setShowChangePassword, activeDropdown, setActiveDropdown, setView,
+  notifications = [], onMarkRead, onMarkAllRead, onOpenNotification, pendingLeaveCount = 0
+}) {
+  return (
+    <aside
+      style={{ width: '64px' }}
+      className="no-print h-screen flex flex-col bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-r border-slate-200/70 dark:border-slate-800/70 z-30 shrink-0 shadow-md dark:shadow-none overflow-hidden"
+    >
+      <div className="flex flex-col h-full w-full py-6 justify-between items-center min-h-0">
+        {/* Top: Back Button */}
+        <div className="flex flex-col items-center shrink-0 w-full mb-6">
+          <button
+            onClick={() => setView('dashboard')}
+            title="Back to Dashboard"
+            className="w-12 h-12 rounded-xl flex items-center justify-center transition-all cursor-pointer text-slate-500 hover:bg-slate-100/60 dark:hover:bg-slate-850 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-slate-800/60 shadow-sm bg-slate-50 dark:bg-slate-950/40 hover:scale-105"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        </div>
+
+        {/* Bottom: Bell and Profile */}
+        <div className="w-full px-2 flex flex-col items-center gap-4 shrink-0">
+          {/* Bell Icon Button */}
+          <button
+            onClick={() => setActiveDropdown(prev => prev === 'bell' ? null : 'bell')}
+            className={`dock-item w-12 h-12 rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer relative text-slate-500 dark:text-slate-400 hover:bg-slate-100/60 dark:hover:bg-slate-850 hover:text-slate-900 dark:hover:text-white
+              ${activeDropdown === 'bell' ? 'text-amber-500 dark:text-amber-400 bg-slate-100/60 dark:bg-slate-850' : ''}`}
+            title="Notifications"
+          >
+            <Bell size={18} />
+            {notifications.length > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[15px] h-[15px] px-1 flex items-center justify-center text-[8px] font-black rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
+                {notifications.length > 9 ? '9+' : notifications.length}
+              </span>
+            )}
+          </button>
+
+          {/* Profile Avatar Button */}
+          <button
+            onClick={() => setActiveDropdown(prev => prev === 'profile' ? null : 'profile')}
+            className={`w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shadow-sm border border-blue-500/20 transition-all duration-300 cursor-pointer shrink-0 relative overflow-hidden hover:scale-110 active:scale-95 hover:ring-2 hover:ring-blue-500/50 hover:shadow-[0_0_12px_rgba(59,130,246,0.3)]
+              ${activeDropdown === 'profile' ? 'ring-2 ring-blue-500/50 shadow-[0_0_12px_rgba(59,130,246,0.3)]' : ''}`}
+            title="Advisor Profile"
+          >
+            {advisorProfile.photo ? (
+              <img src={advisorProfile.photo} alt={advisorProfile.name} className="w-full h-full object-cover" />
+            ) : (
+              advisorProfile.name ? advisorProfile.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'NL'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Bell popover rendered next to the sidebar ── */}
+      {activeDropdown === 'bell' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '72px',
+            left: '76px',
+            zIndex: 9999,
+          }}
+          className="w-80 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/80 shadow-2xl animate-scale-up p-4 text-left"
+        >
+          {/* Arrow */}
+          <div
+            style={{ position: 'absolute', left: -6, bottom: '16px', transform: 'rotate(-45deg)' }}
+            className="w-3 h-3 bg-white dark:bg-slate-900 border-l border-b border-slate-200/70 dark:border-slate-700/60"
+          />
+
+          <NotificationPanel
+            notifications={notifications}
+            onMarkRead={onMarkRead}
+            onMarkAllRead={onMarkAllRead}
+            onOpen={onOpenNotification}
+          />
+        </div>,
+        document.body
+      )}
+
+      {/* ── Profile popover rendered next to the sidebar ── */}
+      {activeDropdown === 'profile' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '16px',
+            left: '76px',
+            zIndex: 9999,
+          }}
+          className="w-64 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/80 shadow-2xl animate-scale-up p-4 text-left"
+        >
+          {/* Arrow */}
+          <div
+            style={{ position: 'absolute', left: -6, bottom: '16px', transform: 'rotate(-45deg)' }}
+            className="w-3 h-3 bg-white dark:bg-slate-900 border-l border-b border-slate-200/70 dark:border-slate-700/60"
+          />
+
+          <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 mb-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0 overflow-hidden">
+              {advisorProfile.photo ? (
+                <img src={advisorProfile.photo} alt={advisorProfile.name} className="w-full h-full object-cover" />
+              ) : (
+                advisorProfile.name ? advisorProfile.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'NL'
+              )}
+            </div>
+            <div className="min-w-0">
+              <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">{advisorProfile.name || getCurrentUser()?.name || 'User'}</h4>
+              <p className="text-[9px] text-slate-450 dark:text-slate-500 truncate font-semibold">{advisorProfile.email || 'nitesh@teamfintness.com'}</p>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="px-3 py-2 text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase tracking-widest">
+              Account and General Settings
+            </div>
+            <button
+              onClick={() => { setActiveDropdown(null); setView('myprofile'); }}
+              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+            >
+              Profile Settings
+            </button>
+            <button
+              onClick={() => { setActiveDropdown(null); setView('leave'); }}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+            >
+              <span>Leave</span>
+              {pendingLeaveCount > 0 && (
+                <span className="text-[9px] font-black text-white bg-amber-500 rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">
+                  {pendingLeaveCount > 99 ? '99+' : pendingLeaveCount}
+                </span>
+              )}
+            </button>
+            {isAdmin && (
+              <button
+                onClick={() => { setActiveDropdown(null); setView('users'); }}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+              >
+                <span>User Management</span>
+                <span className="text-[8px] font-bold bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 ml-1.5 px-1.5 py-0.5 rounded uppercase tracking-wider">Admin</span>
+              </button>
+            )}
+            <button className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all">
+              Preferences <span className="text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-550 ml-1.5 px-1 py-0.5 rounded">Soon</span>
+            </button>
+            <button
+              onClick={() => { setActiveDropdown(null); setShowChangePassword(true); }}
+              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+            >
+              Change Password
+            </button>
+            <div className="border-t border-slate-100 dark:border-slate-800 my-2" />
+            <button
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-650 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+            >
+              <span>Theme Mode</span>
+              {theme === 'dark' ? <Sun size={14} className="text-amber-500" /> : <Moon size={14} className="text-slate-400" />}
+            </button>
+            <button
+              onClick={() => {
+                setActiveDropdown(null);
+                onLogout();
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-455 hover:bg-rose-50 dark:hover:bg-rose-955/20 cursor-pointer transition-all"
+            >
+              <span>Sign Out</span>
+              <LogOut size={14} />
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+    </aside>
   );
 }

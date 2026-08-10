@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  ArrowLeft, Printer, AlertCircle, CheckCircle2
+import {
+  ArrowLeft, Printer, AlertCircle, CheckCircle2, Save
 } from 'lucide-react';
+import { CoolSelect } from './UI';
+import { saveGeneratedDocument, wrapStandaloneHtml, snapshotElementHtml } from '../utils/documents';
+import { teamName } from '../services/team';
 
 const CHART_JS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
 const GOOGLE_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxR_YWt7vbldI57ZxqX3WrnvZrp0gTLWPa8Fqo-YmMjRvo760WT_gd62njXd3q9e7n0/exec';
@@ -135,7 +138,10 @@ export default function PolicyReview({ client, onBack }) {
     if (client) {
       setClientName(client.name || '');
       setClientPan(client.pan || '');
-      setGroupLeader(client.clientDetails?.relationshipManager || '');
+      // relationshipManager is stored as a user id — show the person's NAME,
+      // not the raw id. teamName() returns the id verbatim if it isn't a known
+      // account (legacy name strings), so this is safe either way.
+      setGroupLeader(teamName(client.clientDetails?.relationshipManager) || '');
     }
   }, [client]);
 
@@ -739,10 +745,53 @@ export default function PolicyReview({ client, onBack }) {
     }, 500);
   };
 
+  // Save the rendered Policy Review as a document in the client's Documents.
+  const resultsRef = useRef(null);
+  const [savingDoc, setSavingDoc] = useState(false);
+  const [docMsg, setDocMsg] = useState('');
+  const handleSaveDocument = async () => {
+    if (!results || results.length === 0) {
+      alert('Please analyze a policy first, then save.');
+      return;
+    }
+    if (!client?.id) {
+      setDocMsg('⚠️ Not linked to a saved client — cannot save.');
+      setTimeout(() => setDocMsg(''), 4000);
+      return;
+    }
+    if (!resultsRef.current) return;
+    setSavingDoc(true);
+    try {
+      const inner = snapshotElementHtml(resultsRef.current);
+      const html = wrapStandaloneHtml(
+        `<div class="policy-review-container">${inner}</div>`,
+        `Policy Review — ${clientName || client.name}`,
+        POLICY_REVIEW_STYLES
+      );
+      const name = await saveGeneratedDocument(client, {
+        kind: 'policy',
+        label: 'Policy Review Report',
+        html,
+      });
+      setDocMsg(`✅ Saved to Documents as ${name}`);
+    } catch (err) {
+      setDocMsg(`⚠️ ${err.message || 'Could not save document.'}`);
+    } finally {
+      setSavingDoc(false);
+      setTimeout(() => setDocMsg(''), 4000);
+    }
+  };
+
   return (
     <div className="policy-review-container">
       {/* Dynamic Style tags to contain the premium look CSS from policy tool, scoped to our container */}
       <style>{POLICY_REVIEW_STYLES}</style>
+
+      {docMsg && (
+        <div className="no-print" style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 50, padding: '12px 20px', borderRadius: '12px', background: '#059669', color: '#fff', fontSize: '14px', fontWeight: 600, boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}>
+          {docMsg}
+        </div>
+      )}
 
       {/* Main App Block */}
       <div className="app no-print">
@@ -750,6 +799,7 @@ export default function PolicyReview({ client, onBack }) {
         <div className="page-hero" style={{ justifyContent: 'flex-end' }}>
           <div className="flex gap-2">
             <button className="btn btn-outline" onClick={handleReset} type="button">🔄 Reset Form</button>
+            {results && <button className="btn btn-outline" onClick={handleSaveDocument} type="button" disabled={savingDoc}>{savingDoc ? '💾 Saving…' : '💾 Save Document'}</button>}
             {results && <button className="btn btn-gold" onClick={handlePrint} type="button">🖨️ Export PDF / Print</button>}
           </div>
         </div>
@@ -946,25 +996,25 @@ export default function PolicyReview({ client, onBack }) {
                       <div className="fg fg-2">
                         <div className="field">
                           <label>Policy Category</label>
-                          <select 
+                          <CoolSelect 
                             value={p.policyCategory} 
                             onChange={e => updatePolicyField(p.id, 'policyCategory', e.target.value)}
                           >
                             <option value="traditional">Traditional</option>
                             <option value="ulip">ULIP</option>
-                          </select>
+                          </CoolSelect>
                         </div>
                         {!isUlip && (
                           <div className="field" id={`subtype-wrap-${p.id}`}>
                             <label>Sub Type</label>
-                            <select 
+                            <CoolSelect 
                               value={p.policySubtype} 
                               onChange={e => updatePolicyField(p.id, 'policySubtype', e.target.value)}
                             >
                               <option value="endowment">Endowment</option>
                               <option value="moneyback">Money Back</option>
                               <option value="whole_life">Whole Life</option>
-                            </select>
+                            </CoolSelect>
                           </div>
                         )}
                       </div>
@@ -985,7 +1035,7 @@ export default function PolicyReview({ client, onBack }) {
                         </div>
                         <div className="field">
                           <label>Premium Frequency <span className="tip" title="How often the premium is paid">?</span></label>
-                          <select 
+                          <CoolSelect 
                             value={p.premiumFrequency} 
                             onChange={e => updatePolicyField(p.id, 'premiumFrequency', e.target.value)}
                           >
@@ -993,7 +1043,7 @@ export default function PolicyReview({ client, onBack }) {
                             <option value="4">Quarterly</option>
                             <option value="2">Half Yearly</option>
                             <option value="1">Yearly</option>
-                          </select>
+                          </CoolSelect>
                         </div>
                         <div className="field">
                           <label>Premium Per Installment <span className="tip" title="Amount paid each time">?</span></label>
@@ -1406,7 +1456,7 @@ export default function PolicyReview({ client, onBack }) {
 
       {/* Results Workspace (Visually active inside CRM, and prints A4 Landscape) */}
       {results && (
-        <div id="results-container" className="results-wrapper">
+        <div id="results-container" ref={resultsRef} className="results-wrapper">
           {results.map(res => (
             <div key={res.policyId} className="card result-card" style={{ marginBottom: '24px', breakInside: 'avoid' }}>
               <div className="card-head" style={{ borderBottom: '1px solid var(--border)', background: 'rgba(37,99,235,0.03)' }}>

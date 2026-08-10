@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Card, btnPrimary, btnSecondary, btnGhost, inputCls } from './UI';
-import { Plus, Trash2, Shield, Heart, Briefcase, FileText, Printer, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Card, btnPrimary, btnSecondary, btnGhost, inputCls, selectCls, CoolSelect } from './UI';
+import { Plus, Trash2, Shield, Heart, Briefcase, FileText, Printer, ArrowLeft, CheckCircle2, AlertCircle, Save } from 'lucide-react';
 import { LOGO_DATA_URI } from '../assets/logoBase64';
-import { FIXED_ROLES } from '../utils/team';
+import { RELATIONS } from '../utils/team';
+import { uid, DOB_MIN, dobMax } from '../utils/calc';
 import { addProspects } from '../utils/prospects';
+import { saveGeneratedDocument, wrapStandaloneHtml } from '../utils/documents';
 import { ProspectModal } from './BusinessProspects';
 
 export default function InsuranceProposal({ client, isViewer }) {
@@ -31,7 +33,51 @@ export default function InsuranceProposal({ client, isViewer }) {
   }));
 
   // Applicants List
-  const [applicants, setApplicants] = useState(() => getSavedVal('applicants', []));
+  const [applicants, setApplicants] = useState(() => {
+    const saved = getSavedVal('applicants', null);
+    if (saved && saved.length > 0) return saved;
+    if (client) {
+      const list = [];
+      // 1. Proposer (Self)
+      list.push({
+        name: client.name,
+        relation: 'Self',
+        dob: client.clientDetails?.dob || '',
+        smoking: 'No',
+        tobacco: 'No',
+        alcohol: 'No',
+        ped: 'No',
+        pedSpecify: ''
+      });
+
+      // 2. Family Members
+      const family = client.clientDetails?.familyDetails || [];
+      family.forEach(f => {
+        list.push({
+          name: f.name,
+          relation: f.relation || '',
+          dob: f.dob || '',
+          smoking: 'No',
+          tobacco: 'No',
+          alcohol: 'No',
+          ped: 'No',
+          pedSpecify: ''
+        });
+      });
+      return list;
+    }
+    return [];
+  });
+
+  // Resolve applicant options (Group leader client + family members)
+  const applicantOptions = useMemo(() => {
+    if (!client) return [];
+    const opts = [{ name: client.name, relation: 'Self', dob: client.clientDetails?.dob || '', smoking: 'No', tobacco: 'No', alcohol: 'No', ped: 'No' }];
+    (client.clientDetails?.familyDetails || []).forEach(f => {
+      if (f.name) opts.push({ name: f.name, relation: f.relation || 'Member', dob: f.dob || '', smoking: f.smoking || 'No', tobacco: f.tobacco || 'No', alcohol: f.alcohol || 'No', ped: f.ped || 'No' });
+    });
+    return opts;
+  }, [client]);
 
   // Medical State
   const [isPort, setIsPort] = useState(() => getSavedVal('isPort', false));
@@ -80,7 +126,42 @@ export default function InsuranceProposal({ client, isViewer }) {
         const parsed = JSON.parse(saved);
         if (parsed.proposer !== undefined) setProposer(parsed.proposer);
         if (parsed.types !== undefined) setTypes(parsed.types);
-        if (parsed.applicants !== undefined) setApplicants(parsed.applicants);
+        if (parsed.applicants !== undefined) {
+          if (parsed.applicants.length > 0) {
+            setApplicants(parsed.applicants);
+          } else if (client) {
+            const list = [];
+            // 1. Proposer (Self)
+            list.push({
+              name: client.name,
+              relation: 'Self',
+              dob: client.clientDetails?.dob || '',
+              smoking: 'No',
+              tobacco: 'No',
+              alcohol: 'No',
+              ped: 'No',
+              pedSpecify: ''
+            });
+
+            // 2. Family Members
+            const family = client.clientDetails?.familyDetails || [];
+            family.forEach(f => {
+              list.push({
+                name: f.name,
+                relation: f.relation || '',
+                dob: f.dob || '',
+                smoking: 'No',
+                tobacco: 'No',
+                alcohol: 'No',
+                ped: 'No',
+                pedSpecify: ''
+              });
+            });
+            setApplicants(list);
+          } else {
+            setApplicants([]);
+          }
+        }
         if (parsed.isPort !== undefined) setIsPort(parsed.isPort);
         if (parsed.portDate !== undefined) setPortDate(parsed.portDate);
         if (parsed.basePolicies !== undefined) setBasePolicies(parsed.basePolicies);
@@ -102,7 +183,8 @@ export default function InsuranceProposal({ client, isViewer }) {
       list.push({
         name: client.name,
         relation: 'Self',
-        dob: '',
+        dob: client.clientDetails?.dob || '',
+        smoking: 'No',
         tobacco: 'No',
         alcohol: 'No',
         ped: 'No',
@@ -115,7 +197,8 @@ export default function InsuranceProposal({ client, isViewer }) {
         list.push({
           name: f.name,
           relation: f.relation || '',
-          dob: '',
+          dob: f.dob || '',
+          smoking: 'No',
           tobacco: 'No',
           alcohol: 'No',
           ped: 'No',
@@ -192,7 +275,7 @@ export default function InsuranceProposal({ client, isViewer }) {
   const addApplicant = () => {
     setApplicants(prev => [
       ...prev,
-      { name: '', relation: '', dob: '', tobacco: 'No', alcohol: 'No', ped: 'No', pedSpecify: '' }
+      { name: '', relation: '', dob: '', smoking: 'No', tobacco: 'No', alcohol: 'No', ped: 'No', pedSpecify: '' }
     ]);
   };
 
@@ -202,6 +285,25 @@ export default function InsuranceProposal({ client, isViewer }) {
 
   const updateApplicant = (index, key, value) => {
     setApplicants(prev => prev.map((c, i) => i === index ? { ...c, [key]: value } : c));
+  };
+
+  const updateApplicantName = (index, name) => {
+    const opt = applicantOptions.find(o => o.name === name);
+    setApplicants(prev => prev.map((c, i) => {
+      if (i === index) {
+        return {
+          ...c,
+          name,
+          relation: opt ? opt.relation : c.relation,
+          dob: opt ? opt.dob : c.dob,
+          smoking: opt ? opt.smoking : c.smoking,
+          tobacco: opt ? opt.tobacco : c.tobacco,
+          alcohol: opt ? opt.alcohol : c.alcohol,
+          ped: opt ? opt.ped : c.ped,
+        };
+      }
+      return c;
+    }));
   };
 
   // Add/Remove Medical Policies
@@ -381,6 +483,7 @@ export default function InsuranceProposal({ client, isViewer }) {
         name: client.name,
         relation: 'Self',
         dob: '',
+        smoking: 'No',
         tobacco: 'No',
         alcohol: 'No',
         ped: 'No',
@@ -393,6 +496,7 @@ export default function InsuranceProposal({ client, isViewer }) {
           name: f.name,
           relation: f.relation || '',
           dob: '',
+          smoking: 'No',
           tobacco: 'No',
           alcohol: 'No',
           ped: 'No',
@@ -497,21 +601,87 @@ export default function InsuranceProposal({ client, isViewer }) {
       });
     }
 
+    // Block empty proposals up front — a prospect can't be created without a
+    // premium amount entered for every selected insurance type.
+    const zeroAmountDraft = drafts.find(it => !(Number(it.amount) > 0));
+    if (zeroAmountDraft) {
+      alert(`Please enter a premium amount for "${zeroAmountDraft.proposalType}" before creating a prospect.`);
+      return;
+    }
+
     const d = client?.clientDetails || {};
+
+    // Best-effort mapping from the client's stored profession to the KYC
+    // section's Occupation options.
+    const mapOccupation = (prof) => {
+      const p = (prof || '').toLowerCase();
+      if (p.includes('salaried')) return 'Salaried';
+      if (p.includes('self-employed') || p.includes('business') || p.includes('professional')) return 'Self Employed';
+      if (p.includes('homemaker')) return 'House Wife';
+      return '';
+    };
+
+    // Auto-fetch the proposer's habits/PED straight from the Family / Applicants
+    // grid above, so the advisor doesn't have to re-enter them in the Prospect's
+    // KYC section.
+    const proposerName = proposer || client?.name || '';
+    const selfMember = applicants.find(a => a.name === proposerName) ||
+      applicants.find(a => a.relation === 'Self') || applicants[0] || null;
+
+    const kyc = {
+      email: d.email || '',
+      mobile: d.mobile || '',
+      occupation: mapOccupation(d.profession),
+      officeAddress1: d.address1 || '',
+      officeAddress2: d.address2 || '',
+      officeAddress3: d.address3 || '',
+      officeCity: d.city || '',
+      officePincode: d.pinCode || '',
+      officeState: d.state || '',
+      officeCountry: 'India',
+    };
+    if (selfMember) {
+      kyc.smoking = selfMember.smoking || 'No';
+      kyc.tobacco = selfMember.tobacco || 'No';
+      kyc.alcohol = selfMember.alcohol || 'No';
+      kyc.medicalHistory = selfMember.ped || 'No';
+      if (selfMember.ped === 'Yes' && selfMember.pedSpecify) {
+        kyc.diseases = selfMember.pedSpecify.split(',').map(name => name.trim()).filter(Boolean).map(name => ({ id: uid(), name }));
+      }
+    }
+
     setProspectBase({
       groupLeaderId: client?.id || '',
       groupLeader: client?.name || proposer,
-      applicant: proposer || client?.name || '',
+      applicant: proposerName,
       pan: client?.pan || '',
       serviceManager: d.serviceManager || '',
       relationshipManager: d.relationshipManager || '',
       portfolioManager: d.portfolioManager || '',
       insuranceManager: d.insuranceManager || '',
-      owner: FIXED_ROLES.owner,
-      internalManager: FIXED_ROLES.internalManager,
+      owner: d.owner || '',
+      internalManager: d.internalManager || '',
+      kyc,
     });
     setProspectDrafts(drafts);
     setShowProspectModal(true);
+  };
+
+  // Browser "Print / Save PDF" defaults its filename to document.title — set
+  // it to "<Insurance Type(s)> Insurance Proposal of <Client>" right before
+  // printing (comma-joined when more than one type is filled in), then
+  // restore the app's normal title once the print dialog closes.
+  const handlePrint = () => {
+    const typeLabels = [
+      types.medical && 'Medical',
+      types.term && 'Term',
+      types.accidental && 'Accidental',
+    ].filter(Boolean);
+    const who = proposer || client?.name || 'Client';
+    const prevTitle = document.title;
+    document.title = `${typeLabels.length ? typeLabels.join(', ') + ' ' : ''}Insurance Proposal of ${who}`;
+    window.print();
+    document.title = prevTitle;
   };
 
   const handleProspectConfirm = (list) => {
@@ -520,6 +690,36 @@ export default function InsuranceProposal({ client, isViewer }) {
     setShowProspectModal(false);
     setProspectToast(`✅ ${list.length} prospect${list.length > 1 ? 's' : ''} created — see the Prospect module.`);
     setTimeout(() => setProspectToast(''), 4000);
+  };
+
+  const previewDocRef = useRef(null);
+  const [savingDoc, setSavingDoc] = useState(false);
+  const handleSaveDocument = async () => {
+    if (!client?.id) {
+      setProspectToast('⚠️ This proposal is not linked to a saved client, so it cannot be saved.');
+      setTimeout(() => setProspectToast(''), 4000);
+      return;
+    }
+    if (!previewDocRef.current) return;
+    setSavingDoc(true);
+    try {
+      const html = wrapStandaloneHtml(
+        previewDocRef.current.outerHTML,
+        `Insurance Proposal — ${client.name}`,
+        INSURANCE_PRINT_STYLES
+      );
+      const name = await saveGeneratedDocument(client, {
+        kind: 'insurance',
+        label: 'Insurance Proposal',
+        html,
+      });
+      setProspectToast(`✅ Saved to Documents as ${name}`);
+    } catch (err) {
+      setProspectToast(`⚠️ ${err.message || 'Could not save document.'}`);
+    } finally {
+      setSavingDoc(false);
+      setTimeout(() => setProspectToast(''), 4000);
+    }
   };
 
   return (
@@ -553,13 +753,27 @@ export default function InsuranceProposal({ client, isViewer }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Proposer Name</label>
-                <input
-                  type="text"
-                  value={proposer}
-                  onChange={(e) => setProposer(e.target.value)}
-                  placeholder="e.g. Mehul Khandelwal"
-                  className={inputCls}
-                />
+                {applicantOptions.length > 0 ? (
+                  <CoolSelect
+                    showValueOnSelect={true}
+                    value={proposer}
+                    onChange={(e) => setProposer(e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="">Select proposer…</option>
+                    {applicantOptions.map(o => (
+                      <option key={o.name} value={o.name}>{o.name} ({o.relation})</option>
+                    ))}
+                  </CoolSelect>
+                ) : (
+                  <input
+                    type="text"
+                    value={proposer}
+                    onChange={(e) => setProposer(e.target.value)}
+                    placeholder="e.g. full name"
+                    className={inputCls}
+                  />
+                )}
               </div>
 
               <div>
@@ -629,26 +843,40 @@ export default function InsuranceProposal({ client, isViewer }) {
                     </button>
                     <div className="text-[11px] font-bold text-blue-600 dark:text-blue-450 uppercase tracking-widest leading-none">Member #{index + 1}</div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4 items-end">
+                    <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4 items-end">
                       <div className="col-span-1 md:col-span-2 lg:col-span-2">
                         <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Name</label>
-                        <input
-                          type="text"
-                          value={member.name}
-                          onChange={(e) => updateApplicant(index, 'name', e.target.value)}
-                          className={inputCls + ' text-xs py-2 px-3'}
-                          placeholder="Applicant Name"
-                        />
+                        {applicantOptions.length > 0 ? (
+                          <CoolSelect
+                            value={member.name}
+                            onChange={(e) => updateApplicantName(index, e.target.value)}
+                            className={selectCls + ' text-xs py-2 px-3'}
+                          >
+                            <option value="">Select applicant…</option>
+                            {applicantOptions.map(o => (
+                              <option key={o.name} value={o.name}>{o.name}</option>
+                            ))}
+                          </CoolSelect>
+                        ) : (
+                          <input
+                            type="text"
+                            value={member.name}
+                            onChange={(e) => updateApplicant(index, 'name', e.target.value)}
+                            className={inputCls + ' text-xs py-2 px-3'}
+                            placeholder="Applicant Name"
+                          />
+                        )}
                       </div>
                       <div>
                         <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Relation</label>
-                        <input
-                          type="text"
+                        <select
                           value={member.relation}
                           onChange={(e) => updateApplicant(index, 'relation', e.target.value)}
-                          className={inputCls + ' text-xs py-2 px-3'}
-                          placeholder="e.g. Spouse, Son"
-                        />
+                          className={selectCls + ' text-xs py-2 px-3'}
+                        >
+                          <option value="">Select…</option>
+                          {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Date of Birth</label>
@@ -656,15 +884,27 @@ export default function InsuranceProposal({ client, isViewer }) {
                           type="date"
                           value={member.dob}
                           onChange={(e) => updateApplicant(index, 'dob', e.target.value)}
+                          min={DOB_MIN} max={dobMax()}
                           className={inputCls + ' text-xs py-2 px-3'}
                         />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Smoking</label>
+                        <select
+                          value={member.smoking}
+                          onChange={(e) => updateApplicant(index, 'smoking', e.target.value)}
+                          className={selectCls + ' text-xs py-2 px-3'}
+                        >
+                          <option value="No">No</option>
+                          <option value="Yes">Yes</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Tobacco</label>
                         <select
                           value={member.tobacco}
                           onChange={(e) => updateApplicant(index, 'tobacco', e.target.value)}
-                          className={inputCls + ' text-xs py-2 px-3'}
+                          className={selectCls + ' text-xs py-2 px-3'}
                         >
                           <option value="No">No</option>
                           <option value="Yes">Yes</option>
@@ -675,7 +915,7 @@ export default function InsuranceProposal({ client, isViewer }) {
                         <select
                           value={member.alcohol}
                           onChange={(e) => updateApplicant(index, 'alcohol', e.target.value)}
-                          className={inputCls + ' text-xs py-2 px-3'}
+                          className={selectCls + ' text-xs py-2 px-3'}
                         >
                           <option value="No">No</option>
                           <option value="Yes">Yes</option>
@@ -686,7 +926,7 @@ export default function InsuranceProposal({ client, isViewer }) {
                         <select
                           value={member.ped}
                           onChange={(e) => updateApplicant(index, 'ped', e.target.value)}
-                          className={inputCls + ' text-xs py-2 px-3'}
+                          className={selectCls + ' text-xs py-2 px-3'}
                         >
                           <option value="No">No</option>
                           <option value="Yes">Yes</option>
@@ -952,7 +1192,7 @@ export default function InsuranceProposal({ client, isViewer }) {
                         <select
                           value={group.insuredName}
                           onChange={(e) => updateTermGroupInsured(gi, e.target.value)}
-                          className={inputCls + ' text-xs py-1.5 px-2 bg-white dark:bg-slate-950'}
+                          className={selectCls + ' text-xs py-1.5 px-2 bg-white dark:bg-slate-950'}
                         >
                           <option value="">Select or type member...</option>
                           {applicants.map((a, ai) => (
@@ -1166,17 +1406,20 @@ export default function InsuranceProposal({ client, isViewer }) {
                   Sync failed
                 </span>
               )}
+              <button onClick={handleSaveDocument} disabled={savingDoc} className={btnSecondary + ' py-2 px-4 !text-emerald-700 dark:!text-emerald-400 !border-emerald-200 dark:!border-emerald-900/50 disabled:opacity-60'}>
+                <Save size={15} /> {savingDoc ? 'Saving…' : 'Save Document'}
+              </button>
               <button onClick={openCreateProspect} className={btnSecondary + ' py-2 px-4'}>
                 <Briefcase size={15} /> Create Prospect
               </button>
-              <button onClick={() => window.print()} className={btnPrimary + ' py-2 px-5'}>
+              <button onClick={handlePrint} className={btnPrimary + ' py-2 px-5'}>
                 <Printer size={15} /> Print / Save PDF
               </button>
             </div>
           </Card>
 
           {/* Clean Branded Preview Panel */}
-          <div className="proposal-doc max-w-4xl mx-auto">
+          <div ref={previewDocRef} className="proposal-doc max-w-4xl mx-auto">
             <div className="prop-banner">
               <div className="prop-banner-circles">
                 <span></span><span></span><span></span>
@@ -1214,6 +1457,7 @@ export default function InsuranceProposal({ client, isViewer }) {
                           <th>Name</th>
                           <th>Relation</th>
                           <th>Date of Birth</th>
+                          <th>Smoking</th>
                           <th>Tobacco</th>
                           <th>Alcohol</th>
                           <th>Pre-existing Disease</th>
@@ -1226,6 +1470,13 @@ export default function InsuranceProposal({ client, isViewer }) {
                             <td style={{ fontWeight: 600, color: '#0d2a5e' }}>{fmt(m.name)}</td>
                             <td style={{ fontWeight: 600 }}>{fmt(m.relation)}</td>
                             <td>{m.dob ? new Date(m.dob).toLocaleDateString('en-IN') : '—'}</td>
+                            <td>
+                              {m.smoking === 'Yes' ? (
+                                <span className="badge by">⚠ Yes</span>
+                              ) : (
+                                <span className="badge bn">✓ No</span>
+                              )}
+                            </td>
                             <td>
                               {m.tobacco === 'Yes' ? (
                                 <span className="badge by">⚠ Yes</span>
@@ -1440,6 +1691,7 @@ export default function InsuranceProposal({ client, isViewer }) {
           mode="create"
           drafts={prospectDrafts}
           base={prospectBase}
+          clients={client ? [client] : []}
           onClose={() => setShowProspectModal(false)}
           onConfirm={handleProspectConfirm}
         />

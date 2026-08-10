@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, CheckCircle2, Upload, AlertCircle, FileSpreadsheet, ChevronDown, Lock, UserCog } from 'lucide-react';
+import { X, CheckCircle2, Upload, AlertCircle, FileSpreadsheet, ChevronDown, ChevronUp, UserCog, Download, Link2, Wallet } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Field, inputCls, selectCls, btnPrimary, btnGhost } from './UI';
+import { Field, inputCls, selectCls, btnPrimary, btnSecondary, btnGhost, CoolSelect } from './UI';
 import {
-  calcGoal, monthsBetween, fmtFull, fmtINR, fmtSip, nv, parseNum, GOAL_PRESETS, CURRENT_MONTH, CURRENT_YEAR, MONTH_NAMES, needsKidName
+  calcGoal, monthsBetween, fmtFull, fmtINR, fmtSip, nv, parseNum, GOAL_PRESETS, CURRENT_MONTH, CURRENT_YEAR, MONTH_NAMES, needsKidName,
+  DOB_MIN, dobMax, isValidDob, parseFlexibleDate, goalContributions,
 } from '../utils/calc';
-import { TEAM_MEMBERS, FIXED_ROLES } from '../utils/team';
+import { filledItems } from '../utils/assets';
+import { RELATIONS } from '../utils/team';
+import { loadTeam, resolveTeamMemberId } from '../services/team';
+import { CountrySelect, StateSelect, CitySelect } from './LocationPicker';
+import { isAdminRole } from '../utils/auth';
 
-// Relationship options for family / applicant details
-const RELATIONS = [
-  'Self', 'Spouse', 'Son', 'Daughter', 'Father', 'Mother', 'Brother', 'Sister',
-  'Grandfather', 'Grandmother', 'Grandson', 'Granddaughter',
-  'Father-in-law', 'Mother-in-law', 'Son-in-law', 'Daughter-in-law',
-  'Nephew', 'Niece', 'Uncle', 'Aunt', 'Cousin',
-  'Legal Guardian', 'Relative', 'Friend', 'Business Partner',
-  'Employee', 'Employer', 'Trustee',
-];
+const parseAssetAmt = (s) => {
+  const n = Number(String(s ?? '').replace(/,/g, ''));
+  return isFinite(n) && n > 0 ? n : 0;
+};
 
 // Profession options for personal details
 const PROFESSIONS = [
@@ -29,41 +29,64 @@ const CLIENT_TYPES = [
   'Retail', 'HNI', 'Ultra HNI',
 ];
 
+// Marital status options for personal details
+const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed'];
+
 function Modal({ title, onClose, children, footer, maxWidth = 'max-w-md' }) {
   return (
-    <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in" onClick={onClose}>
-      <div className={`bg-white dark:bg-slate-900 rounded-2xl w-full ${maxWidth} shadow-2xl my-8 border border-slate-200/50 dark:border-slate-800/80 animate-scale-up`} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+    <div className="fixed inset-0 bg-slate-900/60 dark:bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in" onClick={onClose}>
+      <div className={`bg-white dark:bg-slate-900 rounded-2xl w-full flex flex-col max-h-[90vh] ${maxWidth} shadow-2xl border border-slate-200/50 dark:border-slate-800/80 animate-scale-up`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">{title}</h3>
           <button onClick={onClose} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
             <X size={18} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
-        {footer && <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 rounded-b-2xl">{footer}</div>}
+        <div className="p-5 overflow-y-auto">
+          {children}
+        </div>
+        {footer && (
+          <div className="p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 rounded-b-2xl shrink-0">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export function ClientFormModal({ initial, onClose, onSave }) {
+export function ClientFormModal({ initial, clients = [], autosaveKey, onClose, onSave }) {
   const isEdit = !!initial;
   const [activeTab, setActiveTab] = useState('personal');
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const isAdmin = isAdminRole();
 
-  // Load initial values safely
-  const initialDetails = initial?.clientDetails || {};
+  // Load initial values safely — if an autosave draft exists for this form
+  // (e.g. the advisor got interrupted midway through converting a lead),
+  // restore it in preference to the plain prefill so no progress is lost.
+  const draftKey = autosaveKey ? `crm:clientFormDraft:${autosaveKey}` : null;
+  const draft = useMemo(() => {
+    if (!draftKey) return null;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }, [draftKey]);
+  const initialDetails = draft?.clientDetails || initial?.clientDetails || {};
 
   // 1. Personal Details State
-  const [name, setName] = useState(initial ? initial.name : '');
-  const [pan, setPan] = useState(initial ? initial.pan : '');
-  const [age, setAge] = useState(initial ? (initial.age || '') : '');
+  const [name, setName] = useState(draft?.name ?? (initial ? initial.name : ''));
+  const [pan, setPan] = useState(draft?.pan ?? (initial ? initial.pan : ''));
+  const [age, setAge] = useState(draft?.age ?? (initial ? (initial.age || '') : ''));
   const [mobile, setMobile] = useState(initialDetails.mobile || '');
   const [email, setEmail] = useState(initialDetails.email || '');
   const [address1, setAddress1] = useState(initialDetails.address1 || '');
   const [address2, setAddress2] = useState(initialDetails.address2 || '');
   const [address3, setAddress3] = useState(initialDetails.address3 || '');
-  const [city, setCity] = useState(initialDetails.city || '');
+  const [country, setCountry] = useState(initialDetails.country || 'India');
   const [stateName, setStateName] = useState(initialDetails.state || '');
+  const [city, setCity] = useState(initialDetails.city || '');
   const [pinCode, setPinCode] = useState(initialDetails.pinCode || '');
   const [status, setStatus] = useState(initialDetails.status || 'Active');
 
@@ -72,6 +95,10 @@ export function ClientFormModal({ initial, onClose, onSave }) {
   const [portfolioManager, setPortfolioManager] = useState(initialDetails.portfolioManager || '');
   const [insuranceManager, setInsuranceManager] = useState(initialDetails.insuranceManager || '');
   const [serviceManager, setServiceManager] = useState(initialDetails.serviceManager || '');
+  // Standing assignments — now real, editable account assignments (were hardcoded).
+  const [owner, setOwner] = useState(initialDetails.owner || '');
+  const [operationManager, setOperationManager] = useState(initialDetails.operationManager || '');
+  const [internalManager, setInternalManager] = useState(initialDetails.internalManager || '');
 
   // 3. Family Details State (Tabular applicants name & relation & PAN)
   const [familyDetails, setFamilyDetails] = useState(
@@ -92,10 +119,65 @@ export function ClientFormModal({ initial, onClose, onSave }) {
   const [clientType, setClientType] = useState(initialDetails.clientType || '');
   const [dob, setDob] = useState(initialDetails.dob || '');
 
+  // 7. Marital Status (mapped into the MOM workspace)
+  const [maritalStatus, setMaritalStatus] = useState(initialDetails.maritalStatus || '');
+
+  // 8. Applicant sub-details — extra optional fields for the PRIMARY applicant
+  // (Self). None are mandatory. Family members get their own copies of these
+  // same fields directly on each member object (see handleAddFamilyMember).
+  const [income, setIncome] = useState(initialDetails.income || '');
+  const [occupation, setOccupation] = useState(initialDetails.occupation || '');
+  const [placeOfBirth, setPlaceOfBirth] = useState(initialDetails.placeOfBirth || '');
+  const [mothersName, setMothersName] = useState(initialDetails.mothersName || '');
+  const [nomineeName, setNomineeName] = useState(initialDetails.nomineeName || '');
+  const [nomineeRelation, setNomineeRelation] = useState(initialDetails.nomineeRelation || '');
+
+  // Autosave — persist this in-progress form to localStorage so a big form
+  // (e.g. converting a lead to a client) never loses progress if the tab is
+  // closed or the modal is dismissed accidentally. Cleared on successful save.
+  useEffect(() => {
+    if (!draftKey) return;
+    const snapshot = {
+      name, pan, age, mobile, email, address1, address2, address3, country, stateName, city, pinCode, status,
+      relationshipManager, portfolioManager, insuranceManager, serviceManager, owner, operationManager, internalManager,
+      familyDetails, mutualFunds, insuranceTerm, insuranceMedical, insuranceAccidental,
+      profession, professionOther, clientType, dob, maritalStatus,
+      income, occupation, placeOfBirth, mothersName, nomineeName, nomineeRelation,
+    };
+    try { localStorage.setItem(draftKey, JSON.stringify(snapshot)); } catch { /* storage full/unavailable — skip */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    draftKey, name, pan, age, mobile, email, address1, address2, address3, country, stateName, city, pinCode, status,
+    relationshipManager, portfolioManager, insuranceManager, serviceManager, owner, operationManager, internalManager,
+    familyDetails, mutualFunds, insuranceTerm, insuranceMedical, insuranceAccidental,
+    profession, professionOther, clientType, dob, maritalStatus,
+    income, occupation, placeOfBirth, mothersName, nomineeName, nomineeRelation,
+  ]);
+
+  const clearDraft = () => { if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* noop */ } } };
+
+  useEffect(() => {
+    if (dob) {
+      const birthDate = new Date(dob);
+      if (!isNaN(birthDate.getTime())) {
+        const today = new Date();
+        let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+          calculatedAge--;
+        }
+        setAge(calculatedAge >= 0 ? String(calculatedAge) : '0');
+      }
+    }
+  }, [dob]);
+
   const panValid = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan);
 
   const handleAddFamilyMember = () => {
-    setFamilyDetails([...familyDetails, { name: '', relation: '', pan: '', dob: '' }]);
+    setFamilyDetails([...familyDetails, {
+      name: '', relation: '', pan: '', dob: '', mobile: '', email: '',
+      income: '', occupation: '', placeOfBirth: '', mothersName: '', nomineeName: '', nomineeRelation: '',
+    }]);
   };
 
   const handleRemoveFamilyMember = (idx) => {
@@ -107,8 +189,88 @@ export function ClientFormModal({ initial, onClose, onSave }) {
     setFamilyDetails(updated);
   };
 
-  const handleSave = () => {
-    if (!name.trim() || !panValid) return;
+  
+  const handleSave = async () => {
+    // Guards against a double-click (or double-tap) firing onSave twice —
+    // onSave is an async server call (creates/converts the client) with no
+    // other guard, so two rapid clicks used to race: the first request
+    // succeeds, the second then collided with the server's own PAN-
+    // uniqueness check and surfaced as "A client with this PAN already
+    // exists", even though nothing was actually wrong with the form.
+    if (saving) return;
+    const errs = {};
+
+    // Validate Personal Details
+    if (!name.trim()) errs.name = "Required";
+    if (!age || isNaN(age) || age <= 0) errs.age = "Required";
+    if (!dob) errs.dob = "Required";
+    else if (!isValidDob(dob)) errs.dob = dob > dobMax() ? "Cannot be in the future" : "Enter a valid date of birth";
+    
+    if (!pan.trim()) errs.pan = "Required";
+    else if (pan.length !== 10 || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan)) errs.pan = "Invalid format";
+    else if (clients.some(c => c.id !== initial?.id && (c.pan || '').toUpperCase() === pan.toUpperCase())) {
+      errs.pan = "A client with this PAN already exists — group leader PAN must be unique";
+    }
+
+    if (!mobile.trim()) errs.mobile = "Required";
+    else if (mobile.replace(/[^0-9]/g, '').length < 10) errs.mobile = "Invalid format";
+    
+    if (!email.trim()) errs.email = "Required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = "Invalid format";
+    
+    if (!clientType) errs.clientType = "Required";
+    if (!status) errs.status = "Required";
+    if (!maritalStatus) errs.maritalStatus = "Required";
+    if (!profession) errs.profession = "Required";
+    if (profession === 'Other' && !professionOther.trim()) errs.professionOther = "Required";
+    
+    if (!address1.trim()) errs.address1 = "Required";
+    if (!address2.trim()) errs.address2 = "Required";
+    if (!address3.trim()) errs.address3 = "Required";
+    
+    if (!country) errs.country = "Required";
+    if (!stateName) errs.stateName = "Required";
+    if (!city) errs.city = "Required";
+    
+    if (!pinCode.trim()) errs.pinCode = "Required";
+    else if (!/^\d{6}$/.test(pinCode)) errs.pinCode = "6 digits required";
+    
+    // Validate Internal Details
+    if (!relationshipManager) errs.relationshipManager = "Required";
+    if (!portfolioManager) errs.portfolioManager = "Required";
+    if (!insuranceManager) errs.insuranceManager = "Required";
+    if (!serviceManager) errs.serviceManager = "Required";
+
+    // Validate Family & Business (Relation is optional)
+    let hasFamErrs = false;
+    const famErrs = {};
+    familyDetails.forEach((f, idx) => {
+      const fE = {};
+      if (!f.name.trim()) { fE.name = "Required"; hasFamErrs = true; }
+      if (!f.pan?.trim()) { fE.pan = "Required"; hasFamErrs = true; }
+      else if (f.pan.length !== 10 || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.pan)) { fE.pan = "Invalid format"; hasFamErrs = true; }
+      if (!f.dob) { fE.dob = "Required"; hasFamErrs = true; }
+      else if (!isValidDob(f.dob)) { fE.dob = f.dob > dobMax() ? "Cannot be in the future" : "Enter a valid date of birth"; hasFamErrs = true; }
+      if (Object.keys(fE).length > 0) famErrs[idx] = fE;
+    });
+
+    setErrors(errs);
+    if (hasFamErrs) errs.familyDetails = famErrs;
+
+    if (Object.keys(errs).length > 0 || hasFamErrs) {
+      alert("Please fix the highlighted errors before saving. Make sure to check all tabs.");
+      
+      // Auto-switch to the first tab with an error
+      if (['name', 'age', 'dob', 'pan', 'mobile', 'email', 'clientType', 'status', 'maritalStatus', 'profession', 'professionOther', 'address1', 'address2', 'address3', 'country', 'stateName', 'city', 'pinCode'].some(k => errs[k])) {
+        setActiveTab('personal');
+      } else if (['relationshipManager', 'portfolioManager', 'insuranceManager', 'serviceManager'].some(k => errs[k])) {
+        setActiveTab('internal');
+      } else {
+        setActiveTab('familyBusiness');
+      }
+      return;
+    }
+
     const clientDetails = {
       mobile,
       email,
@@ -117,8 +279,9 @@ export function ClientFormModal({ initial, onClose, onSave }) {
       address1,
       address2,
       address3,
-      city,
+      country,
       state: stateName,
+      city,
       pinCode,
       profession,
       professionOther: profession === 'Other' ? professionOther : '',
@@ -126,12 +289,22 @@ export function ClientFormModal({ initial, onClose, onSave }) {
       portfolioManager,
       insuranceManager,
       serviceManager,
+      owner,
+      operationManager,
+      internalManager,
       familyDetails: familyDetails.filter(f => f.name.trim()),
       mutualFunds,
       insuranceTerm,
       insuranceMedical,
       insuranceAccidental,
       status,
+      maritalStatus,
+      income,
+      occupation,
+      placeOfBirth,
+      mothersName,
+      nomineeName,
+      nomineeRelation,
       // Preserve any previously-saved CRM data (editor removed from this form)
       openActivities: initialDetails.openActivities || [],
       closedActivities: initialDetails.closedActivities || [],
@@ -140,7 +313,16 @@ export function ClientFormModal({ initial, onClose, onSave }) {
       attachments: initialDetails.attachments || [],
       notes: initialDetails.notes || '',
     };
-    onSave(name, pan, Number(age) || 0, clientDetails);
+    clearDraft();
+    setSaving(true);
+    try {
+      await onSave(name, pan, Number(age) || 0, clientDetails);
+    } finally {
+      // Harmless if onSave already navigated away/unmounted this modal on
+      // success — only matters for the failure case, so a retry is possible
+      // instead of the button staying stuck disabled.
+      setSaving(false);
+    }
   };
 
   const tabClass = (tab) => `
@@ -158,13 +340,25 @@ export function ClientFormModal({ initial, onClose, onSave }) {
       footer={
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnGhost}>Cancel</button>
-          <button 
-            onClick={handleSave} 
-            disabled={!name.trim() || !panValid} 
-            className={btnPrimary}
-          >
-            {isEdit ? "Save Changes" : "Create Client"}
-          </button>
+          {activeTab === 'personal' && (
+            <button onClick={() => setActiveTab('internal')} className={btnPrimary}>
+              Next
+            </button>
+          )}
+          {activeTab === 'internal' && (
+            <button onClick={() => setActiveTab('familyBusiness')} className={btnPrimary}>
+              Next
+            </button>
+          )}
+          {activeTab === 'familyBusiness' && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className={btnPrimary + (saving ? ' opacity-60 cursor-not-allowed' : '')}
+            >
+              {saving ? 'Saving…' : (isEdit ? "Save Changes" : "Create Client")}
+            </button>
+          )}
         </div>
       }
     >
@@ -179,16 +373,16 @@ export function ClientFormModal({ initial, onClose, onSave }) {
         {/* Tab 1: Personal Details */}
         {activeTab === 'personal' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
-            <Field label="Full Name *">
+            <Field label="Full Name *" error={errors.name}>
               <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Aarav Sharma" />
             </Field>
-            <Field label="Age">
-              <input type="number" value={age} onChange={(e) => setAge(e.target.value)} className={inputCls} placeholder="e.g. 35" />
+            <Field label="Age (Auto-calculated) *" error={errors.age}>
+              <input type="number" value={age} readOnly className={`${inputCls} bg-slate-50 dark:bg-slate-900/50 cursor-not-allowed`} placeholder="Select Date of Birth first" />
             </Field>
-            <Field label="Date of Birth">
-              <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} />
+            <Field label="Date of Birth *" error={errors.dob}>
+              <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} min={DOB_MIN} max={dobMax()} className={inputCls} />
             </Field>
-            <Field label="PAN Card Number *" hint={pan && !panValid ? 'Format must be: 5 letters, 4 digits, 1 letter' : null}>
+            <Field label="PAN Card Number *" error={errors.pan} hint={pan && !panValid ? 'Format usually: 5 letters, 4 digits, 1 letter' : null}>
               <input
                 value={pan}
                 onChange={(e) => setPan(e.target.value.toUpperCase().slice(0, 10))}
@@ -197,35 +391,43 @@ export function ClientFormModal({ initial, onClose, onSave }) {
                 className={inputCls + ' font-mono tracking-widest uppercase'}
               />
             </Field>
-            <Field label="Mobile Number">
+            <Field label="Mobile Number *" error={errors.mobile}>
               <input value={mobile} onChange={(e) => setMobile(e.target.value)} className={inputCls} placeholder="e.g. +91 98765 43210" />
             </Field>
-            <Field label="Email Address">
+            <Field label="Email Address *" error={errors.email}>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="e.g. aarav@example.com" />
             </Field>
-            <Field label="Client Type">
+            <Field label="Client Type *" error={errors.clientType}>
               <div className="relative">
-                <select value={clientType} onChange={(e) => setClientType(e.target.value)} className={selectCls}>
+                <CoolSelect value={clientType} onChange={(e) => setClientType(e.target.value)} className={selectCls}>
                   <option value="">Select client type…</option>
                   {CLIENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                </CoolSelect>
               </div>
             </Field>
-            <Field label="Client Status">
+            <Field label="Client Status *" error={errors.status} hint={!isAdmin ? 'Only Admin can change client status' : null}>
               <div className="relative">
-                <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+                <CoolSelect value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls + (!isAdmin ? ' opacity-60 cursor-not-allowed' : '')} disabled={!isAdmin}>
                   <option value="Active">Active</option>
                   <option value="Dead">Dead</option>
                   <option value="Inactive">Inactive</option>
-                </select>
+                </CoolSelect>
               </div>
             </Field>
-            <Field label="Profession">
+            <Field label="Marital Status *" error={errors.maritalStatus}>
               <div className="relative">
-                <select value={profession} onChange={(e) => setProfession(e.target.value)} className={selectCls}>
+                <CoolSelect value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)} className={selectCls}>
+                  <option value="">Select marital status…</option>
+                  {MARITAL_STATUSES.map(m => <option key={m} value={m}>{m}</option>)}
+                </CoolSelect>
+              </div>
+            </Field>
+            <Field label="Profession *" error={errors.profession}>
+              <div className="relative">
+                <CoolSelect value={profession} onChange={(e) => setProfession(e.target.value)} className={selectCls}>
                   <option value="">Select profession…</option>
                   {PROFESSIONS.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
+                </CoolSelect>
               </div>
               {profession === 'Other' && (
                 <input
@@ -236,22 +438,63 @@ export function ClientFormModal({ initial, onClose, onSave }) {
                 />
               )}
             </Field>
-            <Field label="Address Line 1">
+
+            <div className="md:col-span-2 pt-3 mt-1 border-t border-slate-100 dark:border-slate-800">
+              <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 uppercase tracking-wider pl-2 border-l-2 border-indigo-500">Additional Details (Optional)</h4>
+            </div>
+            <Field label="Income (Annual)">
+              <input value={income} onChange={(e) => setIncome(e.target.value)} className={inputCls} placeholder="e.g. 12,00,000" />
+            </Field>
+            <Field label="Occupation">
+              <input value={occupation} onChange={(e) => setOccupation(e.target.value)} className={inputCls} placeholder="e.g. Business" />
+            </Field>
+            <Field label="Place of Birth">
+              <input value={placeOfBirth} onChange={(e) => setPlaceOfBirth(e.target.value)} className={inputCls} placeholder="City, State" />
+            </Field>
+            <Field label="Mother's Name">
+              <input value={mothersName} onChange={(e) => setMothersName(e.target.value)} className={inputCls} placeholder="Mother's full name" />
+            </Field>
+            <Field label="Nominee Name">
+              <input value={nomineeName} onChange={(e) => setNomineeName(e.target.value)} className={inputCls} placeholder="Nominee's full name" />
+            </Field>
+            <Field label="Nominee Relation">
+              <div className="relative">
+                <CoolSelect value={nomineeRelation} onChange={(e) => setNomineeRelation(e.target.value)} className={selectCls}>
+                  <option value="">Select relation…</option>
+                  {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </CoolSelect>
+              </div>
+            </Field>
+
+            <div className="md:col-span-2 pt-3 mt-1 border-t border-slate-100 dark:border-slate-800">
+              <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 uppercase tracking-wider pl-2 border-l-2 border-blue-500">Address</h4>
+            </div>
+            <Field label="Address Line 1 *" error={errors.address1}>
               <input value={address1} onChange={(e) => setAddress1(e.target.value)} className={inputCls} placeholder="Flat/House No, Building Name" />
             </Field>
-            <Field label="Address Line 2">
+            <Field label="Address Line 2 *" error={errors.address2}>
               <input value={address2} onChange={(e) => setAddress2(e.target.value)} className={inputCls} placeholder="Street, Area, Locality" />
             </Field>
-            <Field label="Address Line 3">
+            <Field label="Address Line 3 *" error={errors.address3}>
               <input value={address3} onChange={(e) => setAddress3(e.target.value)} className={inputCls} placeholder="Landmark (Optional)" />
             </Field>
-            <Field label="City">
-              <input value={city} onChange={(e) => setCity(e.target.value)} className={inputCls} placeholder="e.g. Mumbai" />
+            <Field label="Country *" error={errors.country}>
+              <CountrySelect
+                value={country}
+                onChange={(v) => { setCountry(v); setStateName(''); setCity(''); }}
+              />
             </Field>
-            <Field label="State">
-              <input value={stateName} onChange={(e) => setStateName(e.target.value)} className={inputCls} placeholder="e.g. Maharashtra" />
+            <Field label="State *" error={errors.stateName}>
+              <StateSelect
+                country={country}
+                value={stateName}
+                onChange={(v) => { setStateName(v); setCity(''); }}
+              />
             </Field>
-            <Field label="Pin Code">
+            <Field label="City *" error={errors.city}>
+              <CitySelect country={country} state={stateName} value={city} onChange={setCity} />
+            </Field>
+            <Field label="Pin Code *" error={errors.pinCode}>
               <input value={pinCode} onChange={(e) => setPinCode(e.target.value)} className={inputCls} placeholder="e.g. 400001" />
             </Field>
           </div>
@@ -268,32 +511,32 @@ export function ClientFormModal({ initial, onClose, onSave }) {
               </div>
               <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 pl-3.5">Assign team members from the roster to each managing role for this client.</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Relationship Manager">
+                <Field label="Relationship Manager *" error={errors.relationshipManager}>
                   <ManagerSelect value={relationshipManager} onChange={setRelationshipManager} />
                 </Field>
-                <Field label="Portfolio Manager">
+                <Field label="Portfolio Manager *" error={errors.portfolioManager}>
                   <ManagerSelect value={portfolioManager} onChange={setPortfolioManager} />
                 </Field>
-                <Field label="Insurance Manager">
+                <Field label="Insurance Manager *" error={errors.insuranceManager}>
                   <ManagerSelect value={insuranceManager} onChange={setInsuranceManager} />
                 </Field>
-                <Field label="Service Manager">
+                <Field label="Service Manager *" error={errors.serviceManager}>
                   <ManagerSelect value={serviceManager} onChange={setServiceManager} />
                 </Field>
               </div>
             </div>
 
-            {/* Fixed (non-editable) role holders */}
+            {/* Standing assignments — real accounts from the team directory. */}
             <div className="space-y-3">
               <div className="flex items-center gap-2 pl-2 border-l-2 border-indigo-500">
-                <Lock size={14} className="text-indigo-600 dark:text-indigo-400" />
+                <UserCog size={14} className="text-indigo-600 dark:text-indigo-400" />
                 <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 uppercase tracking-wider">Standing Assignments</h4>
               </div>
-              <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 pl-3.5">These roles are fixed across all clients and cannot be changed here.</p>
+              <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 pl-3.5">Assign real team members to these roles for this client.</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <FixedRoleField label="Owner" name={FIXED_ROLES.owner} />
-                <FixedRoleField label="Operation Manager" name={FIXED_ROLES.operationManager} />
-                <FixedRoleField label="Internal Manager" name={FIXED_ROLES.internalManager} />
+                <Field label="Owner"><ManagerSelect value={owner} onChange={setOwner} /></Field>
+                <Field label="Operation Manager"><ManagerSelect value={operationManager} onChange={setOperationManager} /></Field>
+                <Field label="Internal Manager"><ManagerSelect value={internalManager} onChange={setInternalManager} /></Field>
               </div>
             </div>
           </div>
@@ -302,83 +545,146 @@ export function ClientFormModal({ initial, onClose, onSave }) {
         {/* Tab 3: Family & Business Details */}
         {activeTab === 'familyBusiness' && (
           <div className="space-y-6 animate-fade-in">
-            {/* Family Details */}
+            {/* Family Details — one card per member (not a wide table) so
+                nothing gets cramped or clipped inside the modal at any width. */}
             <div className="space-y-3">
               <h4 className="text-sm font-bold text-slate-700 dark:text-slate-350 uppercase tracking-wider pl-2 border-l-2 border-blue-500">Family Details</h4>
-              <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 shadow-sm">
-                <table className="w-full text-xs text-left min-w-[500px]">
-                  <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
-                    <tr>
-                      <th className="px-4 py-3">Applicant Name</th>
-                      <th className="px-4 py-3">PAN</th>
-                      <th className="px-4 py-3">Relation</th>
-                      <th className="px-4 py-3">Date of Birth</th>
-                      <th className="px-4 py-3 w-16 text-center">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {familyDetails.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500 italic">No family members added yet.</td>
-                      </tr>
-                    ) : (
-                      familyDetails.map((member, idx) => (
-                        <tr key={idx} className="bg-white dark:bg-slate-950">
-                          <td className="px-4 py-2">
-                            <input 
-                              value={member.name} 
-                              onChange={(e) => handleFamilyMemberChange(idx, 'name', e.target.value)} 
-                              placeholder="Applicant Name" 
-                              className={inputCls + ' text-xs py-1.5'} 
-                            />
-                          </td>
-                          <td className="px-4 py-2">
+              {familyDetails.length === 0 ? (
+                <div className="border border-dashed border-slate-200 dark:border-slate-800 rounded-xl py-6 text-center text-xs text-slate-400 dark:text-slate-500 italic">
+                  No family members added yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {familyDetails.map((member, idx) => (
+                    <div key={idx} className="border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 shadow-sm overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+                        <span className="text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase tracking-wider">Family Member {idx + 1}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFamilyMember(idx)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+                          title="Remove family member"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        <Field label="Applicant Name *" error={errors.familyDetails?.[idx]?.name}>
+                          <input
+                            value={member.name}
+                            onChange={(e) => handleFamilyMemberChange(idx, 'name', e.target.value)}
+                            placeholder="Full name"
+                            className={`${inputCls} text-xs py-1.5 ${errors.familyDetails?.[idx]?.name ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`}
+                          />
+                        </Field>
+                        <Field label="PAN *" error={errors.familyDetails?.[idx]?.pan}>
+                          <input
+                            value={member.pan || ''}
+                            onChange={(e) => handleFamilyMemberChange(idx, 'pan', e.target.value.toUpperCase().slice(0, 10))}
+                            placeholder="e.g. ABCDE1234F"
+                            className={`${inputCls} text-xs py-1.5 font-mono font-semibold uppercase ${errors.familyDetails?.[idx]?.pan ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`}
+                            maxLength={10}
+                          />
+                        </Field>
+                        <Field label="Relation">
+                          <CoolSelect
+                            value={member.relation}
+                            onChange={(e) => handleFamilyMemberChange(idx, 'relation', e.target.value)}
+                            className={selectCls + ' text-xs py-1.5'}
+                          >
+                            <option value="">Select relation…</option>
+                            {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                          </CoolSelect>
+                        </Field>
+                        <Field label="Date of Birth *" error={errors.familyDetails?.[idx]?.dob}>
+                          <input
+                            type="date"
+                            value={member.dob || ''}
+                            onChange={(e) => handleFamilyMemberChange(idx, 'dob', e.target.value)}
+                            min={DOB_MIN} max={dobMax()}
+                            className={`${inputCls} text-xs py-1.5 ${errors.familyDetails?.[idx]?.dob ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`}
+                          />
+                        </Field>
+                        <Field label="Mobile">
+                          <input
+                            value={member.mobile || ''}
+                            onChange={(e) => handleFamilyMemberChange(idx, 'mobile', e.target.value)}
+                            placeholder="Mobile"
+                            className={`${inputCls} text-xs py-1.5`}
+                          />
+                        </Field>
+                        <Field label="Email">
+                          <input
+                            type="email"
+                            value={member.email || ''}
+                            onChange={(e) => handleFamilyMemberChange(idx, 'email', e.target.value)}
+                            placeholder="Email"
+                            className={`${inputCls} text-xs py-1.5`}
+                          />
+                        </Field>
+                      </div>
+                      <div className="px-4 pb-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Additional Details (Optional)</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          <Field label="Income (Annual)">
                             <input
-                              value={member.pan || ''}
-                              onChange={(e) => handleFamilyMemberChange(idx, 'pan', e.target.value.toUpperCase().slice(0, 10))}
-                              placeholder="e.g. ABCDE1234F"
-                              className={inputCls + ' text-xs py-1.5 font-mono font-semibold uppercase ' + (member.pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(member.pan) ? 'border-rose-500 focus:border-rose-500' : '')}
-                              maxLength={10}
+                              value={member.income || ''}
+                              onChange={(e) => handleFamilyMemberChange(idx, 'income', e.target.value)}
+                              placeholder="e.g. 12,00,000"
+                              className={`${inputCls} text-xs py-1.5`}
                             />
-                          </td>
-                          <td className="px-4 py-2">
-                            <div className="relative">
-                              <select
-                                value={member.relation}
-                                onChange={(e) => handleFamilyMemberChange(idx, 'relation', e.target.value)}
-                                className={selectCls + ' text-xs py-1.5'}
-                              >
-                                <option value="">Select relation…</option>
-                                {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                              </select>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2">
+                          </Field>
+                          <Field label="Occupation">
                             <input
-                              type="date"
-                              value={member.dob || ''}
-                              onChange={(e) => handleFamilyMemberChange(idx, 'dob', e.target.value)}
-                              className={inputCls + ' text-xs py-1.5'}
+                              value={member.occupation || ''}
+                              onChange={(e) => handleFamilyMemberChange(idx, 'occupation', e.target.value)}
+                              placeholder="e.g. Business"
+                              className={`${inputCls} text-xs py-1.5`}
                             />
-                          </td>
-                          <td className="px-4 py-2 text-center">
-                            <button 
-                              type="button" 
-                              onClick={() => handleRemoveFamilyMember(idx)} 
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+                          </Field>
+                          <Field label="Place of Birth">
+                            <input
+                              value={member.placeOfBirth || ''}
+                              onChange={(e) => handleFamilyMemberChange(idx, 'placeOfBirth', e.target.value)}
+                              placeholder="City, State"
+                              className={`${inputCls} text-xs py-1.5`}
+                            />
+                          </Field>
+                          <Field label="Mother's Name">
+                            <input
+                              value={member.mothersName || ''}
+                              onChange={(e) => handleFamilyMemberChange(idx, 'mothersName', e.target.value)}
+                              placeholder="Mother's full name"
+                              className={`${inputCls} text-xs py-1.5`}
+                            />
+                          </Field>
+                          <Field label="Nominee Name">
+                            <input
+                              value={member.nomineeName || ''}
+                              onChange={(e) => handleFamilyMemberChange(idx, 'nomineeName', e.target.value)}
+                              placeholder="Nominee's full name"
+                              className={`${inputCls} text-xs py-1.5`}
+                            />
+                          </Field>
+                          <Field label="Nominee Relation">
+                            <CoolSelect
+                              value={member.nomineeRelation || ''}
+                              onChange={(e) => handleFamilyMemberChange(idx, 'nomineeRelation', e.target.value)}
+                              className={selectCls + ' text-xs py-1.5'}
                             >
-                              <X size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <button 
-                type="button" 
-                onClick={handleAddFamilyMember} 
+                              <option value="">Select relation…</option>
+                              {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                            </CoolSelect>
+                          </Field>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handleAddFamilyMember}
                 className="w-full py-2 border border-dashed border-slate-350 dark:border-slate-800 hover:border-blue-500 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50/10 dark:hover:bg-blue-950/10 transition-all cursor-pointer"
               >
                 + Add Family Member
@@ -492,7 +798,7 @@ export function ClientFormModal({ initial, onClose, onSave }) {
   );
 }
 
-export function GoalFormModal({ initial, onClose, onSave }) {
+export function GoalFormModal({ initial, assetAllocation, clientGoals, onClose, onSave }) {
   const isEdit = !!initial;
   const initialIsPreset = initial ? GOAL_PRESETS.includes(initial.name) && initial.name !== 'Others' : true;
   const [nameChoice, setNameChoice] = useState(initial ? (initialIsPreset ? initial.name : 'Others') : '');
@@ -548,7 +854,59 @@ export function GoalFormModal({ initial, onClose, onSave }) {
   };
   const effectiveName = nameChoice === 'Others' ? customName.trim() : nameChoice;
   const showKidName = needsKidName(effectiveName);
-  const previewCalc = calcGoal({ ...form, name: effectiveName });
+
+  // --- Map Asset ---------------------------------------------------------
+  // The client's existing asset holdings (financial + physical, excludes
+  // liabilities) available to seed this goal's starting corpus. Mapped
+  // amounts are stored separately from currentInv (goal.mappedAssets) — not
+  // folded in — so we can show, per asset, how much is already committed to
+  // this client's OTHER goals and how much is still available.
+  const assetHoldings = useMemo(() => {
+    if (!assetAllocation) return [];
+    return ['financial', 'physical'].flatMap(sid =>
+      filledItems(assetAllocation, sid).map(it => ({ ...it, sectionId: sid }))
+    );
+  }, [assetAllocation]);
+  const hasAssets = assetHoldings.length > 0;
+
+  // How much of each asset is already mapped to this client's OTHER goals
+  // (excludes the goal currently being edited, so re-editing doesn't
+  // double-subtract its own existing mapping).
+  const usageByLabel = useMemo(() => {
+    const map = {};
+    (clientGoals || []).forEach(g => {
+      if (initial && g.id === initial.id) return;
+      (Array.isArray(g.mappedAssets) ? g.mappedAssets : []).forEach(a => {
+        const amt = Number(a.amount) || 0;
+        if (amt <= 0) return;
+        if (!map[a.label]) map[a.label] = [];
+        map[a.label].push({ goalName: g.name, amount: amt });
+      });
+    });
+    return map;
+  }, [clientGoals, initial]);
+
+  const [mapOpen, setMapOpen] = useState(() => Array.isArray(initial?.mappedAssets) && initial.mappedAssets.length > 0);
+  const [mapAmt, setMapAmt] = useState(() => {
+    const m = {};
+    (initial?.mappedAssets || []).forEach(a => { m[a.label] = String(a.amount); });
+    return m;
+  }); // { [assetLabel]: amountString }
+  const setMap = (label, v) => setMapAmt(prev => ({ ...prev, [label]: v }));
+  const mappedTotal = assetHoldings.reduce((s, a) => s + (mapOpen ? parseAssetAmt(mapAmt[a.label]) : 0), 0);
+
+  const mappedAssetsPayload = mapOpen
+    ? assetHoldings
+        .map(a => ({ id: `${a.sectionId}::${a.label}`, sectionId: a.sectionId, label: a.label, amount: parseAssetAmt(mapAmt[a.label]) }))
+        .filter(x => x.amount > 0)
+    : [];
+
+  // `form` only tracks the fields this modal actually edits — it never carries
+  // Create Log entries (those are only ever edited on the GoalDetail page's
+  // Create Log section). Without this, the live preview here would silently
+  // ignore every logged SIP change / portfolio valuation and show numbers
+  // that don't match the goal's real, saved calculation.
+  const previewCalc = calcGoal({ ...form, name: effectiveName, mappedAssets: mappedAssetsPayload, contributions: goalContributions(initial || {}) });
   const targetBeforeStart = monthsBetween(form.createdMonth, form.createdYear, form.targetMonth, form.targetYear) <= 0;
 
   const handleSave = () => {
@@ -565,6 +923,7 @@ export function GoalFormModal({ initial, onClose, onSave }) {
       sipIncRate: Number(form.sipIncRate) || 0,
       currentInv: Number(form.currentInv) || 0,
       currentSip: Number(form.currentSip) || 0,
+      mappedAssets: mappedAssetsPayload,
       createdAt,
     };
     onSave(normalized);
@@ -589,10 +948,10 @@ export function GoalFormModal({ initial, onClose, onSave }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Goal Category Preset">
           <div className="relative">
-            <select value={nameChoice} onChange={(e) => setNameChoice(e.target.value)} className={selectCls}>
+            <CoolSelect value={nameChoice} onChange={(e) => setNameChoice(e.target.value)} className={selectCls}>
               <option value="" disabled>Select target goal preset…</option>
               {GOAL_PRESETS.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
+            </CoolSelect>
           </div>
           {nameChoice === 'Others' && (
             <input
@@ -615,7 +974,7 @@ export function GoalFormModal({ initial, onClose, onSave }) {
           )}
         </Field>
         <Field label="Target cost today (₹)">
-          <input type="number" value={nv(form.amount)} onChange={(e) => upd('amount', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 50,00,000" />
+          <input type="number" onWheel={(e) => e.target.blur()} value={nv(form.amount)} onChange={(e) => upd('amount', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 50,00,000" />
         </Field>
 
         <Field label="Goal Created Date" hint="Backdate this if the goal already existed before using this app">
@@ -625,13 +984,13 @@ export function GoalFormModal({ initial, onClose, onSave }) {
 
         <Field label="Target Month">
           <div className="relative">
-            <select value={form.targetMonth} onChange={(e) => upd('targetMonth', Number(e.target.value))} className={selectCls}>
+            <CoolSelect value={form.targetMonth} onChange={(e) => upd('targetMonth', Number(e.target.value))} className={selectCls}>
               {MONTH_NAMES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-            </select>
+            </CoolSelect>
           </div>
         </Field>
         <Field label="Target Year">
-          <input type="number" value={nv(form.targetYear)} onChange={(e) => upd('targetYear', parseNum(e, 0))} className={inputCls} />
+          <input type="number" onWheel={(e) => e.target.blur()} value={nv(form.targetYear)} onChange={(e) => upd('targetYear', parseNum(e, 0))} className={inputCls} />
         </Field>
 
         <Field label="Future cost (inflation-adjusted)">
@@ -644,22 +1003,107 @@ export function GoalFormModal({ initial, onClose, onSave }) {
         </Field>
 
         <Field label="Assumed Inflation Rate (%)">
-          <input type="number" step="0.1" value={nv(form.inflation)} onChange={(e) => upd('inflation', parseNum(e))} className={inputCls} />
+          <input type="number" onWheel={(e) => e.target.blur()} step="0.1" value={nv(form.inflation)} onChange={(e) => upd('inflation', parseNum(e))} className={inputCls} />
         </Field>
         <Field label="Expected Portfolio Return (%)">
-          <input type="number" step="0.1" value={nv(form.expectedReturn)} onChange={(e) => upd('expectedReturn', parseNum(e))} className={inputCls} />
+          <input type="number" onWheel={(e) => e.target.blur()} step="0.1" value={nv(form.expectedReturn)} onChange={(e) => upd('expectedReturn', parseNum(e))} className={inputCls} />
         </Field>
         <Field label="SIP Annual Step-Up (%)">
-          <input type="number" step="0.1" value={nv(form.sipIncRate)} onChange={(e) => upd('sipIncRate', parseNum(e))} className={inputCls} />
+          <input type="number" onWheel={(e) => e.target.blur()} step="0.1" value={nv(form.sipIncRate)} onChange={(e) => upd('sipIncRate', parseNum(e))} className={inputCls} />
         </Field>
-        <Field label="Existing Accumulated Corpus (₹)">
-          <input type="number" value={nv(form.currentInv)} onChange={(e) => upd('currentInv', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 5,00,000" />
+        <Field label="Existing Accumulated Corpus (₹)" hint={mappedTotal > 0 ? `Typed + ${fmtINR(mappedTotal)} mapped = ${fmtINR((Number(form.currentInv) || 0) + mappedTotal)} effective` : null}>
+          <input type="number" onWheel={(e) => e.target.blur()} value={nv(form.currentInv)} onChange={(e) => upd('currentInv', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 5,00,000" />
         </Field>
         <div className="md:col-span-2">
           <Field label="Current Monthly SIP Allocation (₹)">
-            <input type="number" value={nv(form.currentSip)} onChange={(e) => upd('currentSip', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 25,000" />
+            <input type="number" onWheel={(e) => e.target.blur()} value={nv(form.currentSip)} onChange={(e) => upd('currentSip', parseNum(e, 0))} className={inputCls} placeholder="₹ e.g. 25,000" />
           </Field>
         </div>
+
+        {/* Map Asset — seed the goal corpus from the client's existing asset allocation */}
+        {hasAssets && (
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={mapOpen}
+                onChange={(e) => setMapOpen(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-800 dark:text-slate-200">
+                <Link2 size={14} className="text-blue-600 dark:text-blue-400" /> Map Asset
+              </span>
+              <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                Add part of this client's existing assets to the goal corpus
+              </span>
+            </label>
+
+            {mapOpen && (
+              <div className="mt-3 rounded-xl border border-blue-100 dark:border-slate-800 bg-blue-50/30 dark:bg-slate-950/40 p-4 space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">
+                  <span>Asset · available / total</span>
+                  <span>Amount to map (₹)</span>
+                </div>
+                {assetHoldings.map(a => {
+                  const usedElsewhere = (usageByLabel[a.label] || []).reduce((s, u) => s + u.amount, 0);
+                  const available = Math.max(0, a.amount - usedElsewhere);
+                  const typed = parseAssetAmt(mapAmt[a.label]);
+                  const overAllocated = typed > available;
+                  return (
+                    <div key={a.sectionId + a.label} className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
+                        <div className="flex items-center gap-2 min-w-[140px] flex-1 basis-40">
+                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: a.color }} />
+                          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 break-words">{a.label}</span>
+                          <span className="text-xs font-bold tabular-nums shrink-0 whitespace-nowrap">
+                            <span className={usedElsewhere > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}>{fmtINR(available)}</span>
+                            <span className="text-slate-400 dark:text-slate-500"> / {fmtINR(a.amount)}</span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 ml-auto shrink-0">
+                          <div className="relative w-32 sm:w-36 shrink-0">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600 text-sm pointer-events-none">₹</span>
+                            <input
+                              type="number" onWheel={(e) => e.target.blur()} min="0" max={available} step="any"
+                              value={mapAmt[a.label] ?? ''}
+                              onChange={(e) => setMap(a.label, e.target.value)}
+                              placeholder="0"
+                              className={inputCls + ` pl-7 !py-2 tabular-nums ${overAllocated ? '!border-rose-400 dark:!border-rose-700' : ''}`}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setMap(a.label, String(available))}
+                            className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 hover:underline shrink-0 w-10 text-left cursor-pointer"
+                            title="Map full available value"
+                          >
+                            All
+                          </button>
+                        </div>
+                      </div>
+                      {usedElsewhere > 0 && (
+                        <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400 pl-4.5">
+                          Already used by: {(usageByLabel[a.label] || []).map(u => `${u.goalName} (${fmtINR(u.amount)})`).join(', ')}
+                        </p>
+                      )}
+                      {overAllocated && (
+                        <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 pl-4.5">
+                          Exceeds available balance by {fmtINR(typed - available)}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between pt-2.5 mt-1 border-t border-blue-100 dark:border-slate-800">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    <Wallet size={13} /> Mapped to corpus
+                  </span>
+                  <span className="text-sm font-black text-blue-700 dark:text-blue-400 tabular-nums">{fmtINR(mappedTotal)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mt-6 p-5 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-slate-950 dark:to-slate-900 border border-blue-100 dark:border-slate-800 rounded-xl shadow-sm">
@@ -673,50 +1117,272 @@ export function GoalFormModal({ initial, onClose, onSave }) {
 }
 
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function findCol(header, ...candidates) {
-  const h = header.toLowerCase().replace(/[\s.]/g, '');
-  for (const c of candidates) if (h === c) return true;
-  return false;
+// One family member's field errors — mirrors the manual Create/Edit Client
+// form's rule (a family row that has a name needs a valid PAN and DOB too;
+// mobile/email are optional but checked for format if given).
+function familyMemberErrors(f) {
+  const ff = {};
+  if (!f.pan) ff.pan = 'Missing PAN';
+  else if (!PAN_RE.test(f.pan)) ff.pan = 'Invalid PAN format';
+  if (!f.dob) ff.dob = 'Missing DOB';
+  else if (!isValidDob(f.dob)) ff.dob = 'Invalid DOB';
+  if (f.email && !EMAIL_RE.test(f.email)) ff.email = 'Invalid email';
+  // Relation is free text in the sheet but must match one of the same
+  // options the manual form's dropdown offers (case-insensitive, so
+  // "others"/"OTHERS" etc. from the sheet still count as the "Others"
+  // option) — anything else gets flagged for the user to pick from the
+  // dropdown in the preview table below instead of silently importing an
+  // arbitrary string.
+  if (f.relation && !RELATIONS.some((r) => r.toLowerCase() === f.relation.toLowerCase())) {
+    ff.relation = `"${f.relation}" doesn't match any relation option`;
+  }
+  return ff;
 }
 
-export function ExcelImportModal({ onClose, onImport }) {
+// Resolve a manager reference from the sheet (a team member's id, verbatim,
+// or their name, case-insensitively) to a real active team member id — same
+// matching rule App.jsx's resolveManager() uses at actual import time, so a
+// row that validates here won't silently import with a blank manager there.
+function resolveManagerId(v, team) {
+  // Ambiguity-safe: a name that matches two accounts resolves to '' (flagged
+  // as unmatched below) rather than silently picking one.
+  return resolveTeamMemberId(v, team).id;
+}
+
+const MANAGER_LABELS = {
+  relationshipManager: 'Relationship Manager',
+  portfolioManager: 'Portfolio Manager',
+  insuranceManager: 'Insurance Manager',
+  serviceManager: 'Service Manager',
+};
+
+// Every reason a parsed row can't be imported as-is — the full rule set the
+// manual Create/Edit Client form enforces (required fields, email/mobile/
+// pincode/DOB format, a manager name that actually matches someone), plus
+// duplicate-PAN checks the manual form doesn't need (one row at a time
+// there; a whole sheet here). `fields` flags exactly which columns are
+// wrong, `familyFields[i]` the same for the i-th family member — the
+// preview table highlights and lets you fix both right there.
+function rowErrors(r, i, allRows, existingClients, team) {
+  const fields = {};
+  const msgs = [];
+  const flag = (field, msg) => { fields[field] = true; msgs.push(msg); };
+
+  if (!r.name) flag('name', 'Missing name');
+  if (!r.pan) flag('pan', 'Missing PAN');
+  else if (!PAN_RE.test(r.pan)) flag('pan', 'Invalid PAN format');
+  else if (allRows.some((other, j) => j !== i && other.pan === r.pan)) flag('pan', 'Duplicate PAN in sheet');
+  else if (existingClients.some((c) => (c.pan || '').toUpperCase() === r.pan)) flag('pan', 'PAN already exists');
+
+  if (!r.email) flag('email', 'Missing email');
+  else if (!EMAIL_RE.test(r.email)) flag('email', 'Invalid email');
+  if (!r.mobile) flag('mobile', 'Missing mobile');
+  else if (r.mobile.replace(/[^0-9]/g, '').length < 10) flag('mobile', 'Invalid mobile');
+  if (!r.pinCode) flag('pinCode', 'Missing pincode');
+  else if (!/^\d{6}$/.test(r.pinCode)) flag('pinCode', 'Invalid pincode');
+  if (!r.dob) flag('dob', 'Missing DOB');
+  else if (!isValidDob(r.dob)) flag('dob', 'Invalid DOB');
+  // Address is required on the manual Create/Edit Client form — match that
+  // here too, since a bulk-imported client shouldn't skip a rule a manually
+  // added one can't.
+  if (!r.address1) flag('address1', 'Missing address line 1');
+  if (!r.address2) flag('address2', 'Missing address line 2');
+  if (!r.address3) flag('address3', 'Missing address line 3');
+  if (!r.clientType) flag('clientType', 'Missing client type');
+  if (!r.maritalStatus) flag('maritalStatus', 'Missing marital status');
+  if (!r.profession) flag('profession', 'Missing profession');
+  if (!r.state) flag('state', 'Missing state');
+  if (!r.city) flag('city', 'Missing city');
+
+  // Manager columns must map to a real, UNIQUE team member. A name that
+  // matches nobody, or matches two accounts (the ambiguity that mis-linked
+  // owner/RM before), is flagged rather than silently mapped/blanked — the
+  // whole point, since owner/RM drives RBAC + every task/prospect on the
+  // client. The 4 core managers are required; owner/operation/internal are
+  // only checked when a value is present.
+  const checkManager = (mf, label, required) => {
+    const v = r.managers?.[mf];
+    if (!v) { if (required) flag(mf, `Missing ${label}`); return; }
+    const { status } = resolveTeamMemberId(v, team);
+    if (status === 'nomatch') flag(mf, `${label} "${v}" — no such user exists`);
+    else if (status === 'ambiguous') flag(mf, `${label} "${v}" matches more than one account — make the name unique`);
+  };
+  for (const mf of Object.keys(MANAGER_LABELS)) checkManager(mf, MANAGER_LABELS[mf], true);
+  checkManager('owner', 'Owner', false);
+  checkManager('operationManager', 'Operation Manager', false);
+  checkManager('internalManager', 'Internal Manager', false);
+
+  const familyFields = (r.familyDetails || []).map(familyMemberErrors);
+  familyFields.forEach((ff, fi) => {
+    if (Object.keys(ff).length) msgs.push(`Family ${fi + 1} (${r.familyDetails[fi].name}): ${Object.values(ff).join(', ')}`);
+  });
+
+  return { fields, msgs, familyFields };
+}
+
+// Normalize a header for fuzzy matching: lowercase, strip spaces/dots/_/-.
+const normHeader = (h) => String(h).toLowerCase().replace(/[\s._-]/g, '');
+
+// Candidate header keys (already normalized) for each client field, so the
+// sheet's column labels don't have to match a rigid template exactly.
+const COLS = {
+  name: ['name', 'clientname', 'fullname', 'applicantname'],
+  pan: ['pan', 'panno', 'pannumber', 'pancard', 'pancardno'],
+  age: ['age', 'clientage', 'years'],
+  dob: ['dob', 'dateofbirth', 'birthdate', 'birthday'],
+  mobile: ['mobile', 'mobileno', 'mobilenumber', 'phone', 'phoneno', 'contact', 'contactno'],
+  email: ['email', 'emailid', 'emailaddress', 'mail'],
+  clientType: ['clienttype', 'type', 'category'],
+  maritalStatus: ['maritalstatus', 'marital'],
+  profession: ['profession', 'occupation', 'job'],
+  address1: ['address1', 'addressline1', 'address', 'addr1'],
+  address2: ['address2', 'addressline2', 'addr2'],
+  address3: ['address3', 'addressline3', 'addr3'],
+  city: ['city'],
+  state: ['state'],
+  country: ['country'],
+  pinCode: ['pincode', 'pin', 'postalcode', 'zip', 'zipcode'],
+  status: ['status', 'clientstatus'],
+  mutualFunds: ['mutualfunds', 'mutualfund', 'mf'],
+  insuranceTerm: ['terminsurance', 'insuranceterm', 'term'],
+  insuranceMedical: ['medicalinsurance', 'insurancemedical', 'medical', 'health', 'healthinsurance'],
+  insuranceAccidental: ['accidentalinsurance', 'insuranceaccidental', 'accidental'],
+  relationshipManager: ['relationshipmanager', 'rm'],
+  portfolioManager: ['portfoliomanager', 'pm'],
+  insuranceManager: ['insurancemanager', 'im'],
+  serviceManager: ['servicemanager', 'sm'],
+  owner: ['owner', 'accountowner'],
+  operationManager: ['operationmanager', 'operationsmanager', 'opsmanager', 'om'],
+  internalManager: ['internalmanager'],
+};
+
+const MANAGER_FIELDS = ['relationshipManager', 'portfolioManager', 'insuranceManager', 'serviceManager', 'owner', 'operationManager', 'internalManager'];
+const HOLDING_FIELDS = ['mutualFunds', 'insuranceTerm', 'insuranceMedical', 'insuranceAccidental'];
+
+const yesNo = (v) => {
+  const s = String(v).trim().toLowerCase();
+  if (['yes', 'y', 'true', '1'].includes(s)) return 'Yes';
+  return 'No';
+};
+
+// The full set of columns the sample template ships with (also the export order).
+const TEMPLATE_HEADERS = [
+  'Name', 'PAN', 'Age', 'DOB', 'Mobile', 'Email', 'Client Type', 'Marital Status', 'Profession',
+  'Address 1', 'Address 2', 'Address 3', 'City', 'State', 'Country', 'Pincode', 'Status',
+  'Mutual Funds', 'Term Insurance', 'Medical Insurance', 'Accidental Insurance',
+  'Relationship Manager', 'Portfolio Manager', 'Insurance Manager', 'Service Manager', 'Owner', 'Operation Manager', 'Internal Manager',
+  'Family 1 Name', 'Family 1 Relation', 'Family 1 PAN', 'Family 1 DOB', 'Family 1 Mobile', 'Family 1 Email',
+  'Family 2 Name', 'Family 2 Relation', 'Family 2 PAN', 'Family 2 DOB', 'Family 2 Mobile', 'Family 2 Email',
+  // A 3rd example makes the "just keep numbering" pattern obvious — the import
+  // parser (see famKeys below) already reads "Family <n> ..." for any n, so
+  // there's no real cap; Family 4, 5, etc. work exactly the same way.
+  'Family 3 Name', 'Family 3 Relation', 'Family 3 PAN', 'Family 3 DOB', 'Family 3 Mobile', 'Family 3 Email',
+];
+
+export function ExcelImportModal({ onClose, onImport, clients = [] }) {
   const fileRef = useRef();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
+  const [importedCount, setImportedCount] = useState(0);
+  // Keyed by the sheet's own row number (stable across partial imports —
+  // array position isn't, once imported rows are removed from `rows`).
+  const [expandedRows, setExpandedRows] = useState(() => new Set());
+
+  const downloadTemplate = () => {
+    const example = {
+      Name: 'Aarav Sharma', PAN: 'ABCPS1234A', Age: 33, DOB: '1992-05-15',
+      Mobile: '9876543210', Email: 'aarav@example.com', 'Client Type': 'HNI', 'Marital Status': 'Married', Profession: 'Salaried – Private Sector',
+      'Address 1': 'Flat 101, Sunrise Apartments', 'Address 2': 'MG Road', 'Address 3': 'Near City Mall',
+      City: 'Jaipur', State: 'Rajasthan', Country: 'India', Pincode: '302004', Status: 'Active',
+      'Mutual Funds': 'Yes', 'Term Insurance': 'No', 'Medical Insurance': 'Yes', 'Accidental Insurance': 'No',
+      'Relationship Manager': 'Mehul Khandelwal', 'Portfolio Manager': 'Nitesh Luthra', 'Insurance Manager': 'Mehul Khandelwal',
+      'Service Manager': 'Mehul Khandelwal', Owner: 'Nitesh Luthra', 'Operation Manager': 'Mehul Khandelwal', 'Internal Manager': 'Mehul Khandelwal',
+      'Family 1 Name': 'Nisha Sharma', 'Family 1 Relation': 'Spouse', 'Family 1 PAN': 'XYZPN5678B', 'Family 1 DOB': '1994-08-22', 'Family 1 Mobile': '9876500000', 'Family 1 Email': 'nisha@example.com',
+      'Family 2 Name': 'Aryan Sharma', 'Family 2 Relation': 'Son', 'Family 2 PAN': '', 'Family 2 DOB': '2016-03-10', 'Family 2 Mobile': '', 'Family 2 Email': '',
+      'Family 3 Name': 'Kavita Sharma', 'Family 3 Relation': 'Mother', 'Family 3 PAN': '', 'Family 3 DOB': '1965-11-02', 'Family 3 Mobile': '', 'Family 3 Email': '',
+    };
+    const ws = XLSX.utils.json_to_sheet([example], { header: TEMPLATE_HEADERS });
+    ws['!cols'] = TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(12, h.length + 2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Clients');
+    XLSX.writeFile(wb, 'client_import_template.xlsx');
+  };
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setError('');
     setRows(null);
+    setImportedCount(0);
+    setExpandedRows(new Set());
 
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
         if (!data.length) { setError('The sheet appears to be empty.'); return; }
 
         const headers = Object.keys(data[0]);
-        const nameKey = headers.find(h => findCol(h, 'name', 'clientname', 'fullname'));
-        const panKey  = headers.find(h => findCol(h, 'pan', 'panno', 'pannumber', 'pancard'));
-        const ageKey  = headers.find(h => findCol(h, 'age', 'clientage', 'years'));
+        // Map each declared field to the actual header key present in the sheet.
+        const keyFor = {};
+        for (const [field, cands] of Object.entries(COLS)) {
+          const hit = headers.find((h) => cands.includes(normHeader(h)));
+          if (hit) keyFor[field] = hit;
+        }
+        // Family columns: "Family <n> <Field>" -> famKeys[n][field] = header.
+        const famKeys = {};
+        for (const h of headers) {
+          const m = normHeader(h).match(/^family(\d+)(name|relation|pan|dob|mobile|email)$/);
+          if (m) {
+            const idx = Number(m[1]);
+            (famKeys[idx] = famKeys[idx] || {})[m[2]] = h;
+          }
+        }
 
-        if (!nameKey) { setError('Could not find a "Name" column in the sheet.'); return; }
-        if (!panKey)  { setError('Could not find a "PAN" column in the sheet.'); return; }
+        if (!keyFor.name) { setError('Could not find a "Name" column in the sheet.'); return; }
+        if (!keyFor.pan) { setError('Could not find a "PAN" column in the sheet.'); return; }
+
+        const val = (r, field) => (keyFor[field] ? String(r[keyFor[field]] ?? '').trim() : '');
 
         const parsed = data
-          .map((r, i) => ({
-            rowNum: i + 2,
-            name: String(r[nameKey] || '').trim(),
-            pan: String(r[panKey] || '').toUpperCase().trim(),
-            age: ageKey ? (Number(r[ageKey]) || 0) : 0,
-          }))
-          .filter(r => r.name || r.pan);
+          .map((r, i) => {
+            const familyDetails = Object.keys(famKeys)
+              .sort((a, b) => Number(a) - Number(b))
+              .map((idx) => {
+                const fk = famKeys[idx];
+                const g = (f) => (fk[f] ? String(r[fk[f]] ?? '').trim() : '');
+                // DOB needs the raw cell value (number/Date/text) before it's
+                // stringified, so parseFlexibleDate can tell them apart.
+                const dob = fk.dob ? parseFlexibleDate(r[fk.dob]) : '';
+                return { name: g('name'), relation: g('relation'), pan: g('pan').toUpperCase(), dob, mobile: g('mobile'), email: g('email') };
+              })
+              .filter((f) => f.name);
+
+            const managers = {};
+            for (const mf of MANAGER_FIELDS) managers[mf] = val(r, mf);
+            const holdings = {};
+            for (const hf of HOLDING_FIELDS) holdings[hf] = keyFor[hf] ? yesNo(r[keyFor[hf]]) : 'No';
+
+            return {
+              rowNum: i + 2,
+              name: val(r, 'name'),
+              pan: val(r, 'pan').toUpperCase(),
+              age: keyFor.age ? (Number(r[keyFor.age]) || 0) : 0,
+              dob: keyFor.dob ? parseFlexibleDate(r[keyFor.dob]) : '', mobile: val(r, 'mobile'), email: val(r, 'email'),
+              clientType: val(r, 'clientType'), maritalStatus: val(r, 'maritalStatus'), profession: val(r, 'profession'),
+              address1: val(r, 'address1'), address2: val(r, 'address2'), address3: val(r, 'address3'),
+              city: val(r, 'city'), state: val(r, 'state'), country: val(r, 'country') || 'India',
+              pinCode: val(r, 'pinCode'), status: val(r, 'status') || 'Active',
+              ...holdings, managers, familyDetails,
+            };
+          })
+          .filter((r) => r.name || r.pan);
 
         if (!parsed.length) { setError('No data rows found after the header.'); return; }
         setRows(parsed);
@@ -727,13 +1393,49 @@ export function ExcelImportModal({ onClose, onImport }) {
     reader.readAsArrayBuffer(file);
   };
 
-  const validRows = rows ? rows.filter(r => r.name && PAN_RE.test(r.pan)) : [];
+  const team = loadTeam();
+  const errorsByRow = useMemo(
+    () => rows ? rows.map((r, i) => rowErrors(r, i, rows, clients, team)) : [],
+    [rows, clients, team]
+  );
+  const validRows = rows ? rows.filter((r, i) => errorsByRow[i].msgs.length === 0) : [];
 
+  // Fix a bad cell right in the preview instead of re-editing the sheet and
+  // re-uploading — re-validates live (errorsByRow is derived from `rows`).
+  // Keyed by rowNum (stable) rather than array position, since a partial
+  // import below removes rows and shifts everyone else's position.
+  const updateRow = (rowNum, field, value) => {
+    setRows((prev) => prev.map((r) => (r.rowNum === rowNum ? { ...r, [field]: value } : r)));
+  };
+
+  const updateFamilyField = (rowNum, famIndex, field, value) => {
+    setRows((prev) => prev.map((r) => {
+      if (r.rowNum !== rowNum) return r;
+      return { ...r, familyDetails: r.familyDetails.map((f, fi) => (fi === famIndex ? { ...f, [field]: value } : f)) };
+    }));
+  };
+
+  const toggleExpand = (rowNum) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowNum)) next.delete(rowNum); else next.add(rowNum);
+      return next;
+    });
+  };
+
+  // Import whatever's currently valid, then keep the modal open with just the
+  // still-broken rows — at ~700 entries, forcing every single row to be
+  // perfect before anything can be saved would be a nightmare. Only closes
+  // once nothing is left to fix.
   const handleImport = async () => {
     setImporting(true);
     try {
-      await onImport(validRows);
-      onClose();
+      const toImport = validRows;
+      await onImport(toImport);
+      setImportedCount((c) => c + toImport.length);
+      const remaining = rows.filter((r) => !toImport.includes(r));
+      if (remaining.length) setRows(remaining);
+      else onClose();
     } finally {
       setImporting(false);
     }
@@ -747,22 +1449,43 @@ export function ExcelImportModal({ onClose, onImport }) {
       footer={
         <div className="flex justify-between items-center gap-2">
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-            {rows ? `${validRows.length} of ${rows.length} rows valid` : 'Upload a .xlsx / .xls file'}
+            {importedCount > 0 && <span className="text-emerald-600 dark:text-emerald-400">{importedCount} imported so far — </span>}
+            {rows ? `${validRows.length} of ${rows.length} rows valid` : (importedCount > 0 ? 'All done' : 'Upload a .xlsx / .xls file')}
           </span>
           <div className="flex gap-2">
-            <button onClick={onClose} className={btnGhost}>Cancel</button>
+            <button onClick={onClose} className={btnGhost}>{importedCount > 0 ? 'Close' : 'Cancel'}</button>
             <button
               onClick={handleImport}
               disabled={!validRows.length || importing}
               className={btnPrimary}
             >
-              {importing ? 'Importing…' : `Import ${validRows.length} portfolio${validRows.length !== 1 ? 's' : ''}`}
+              {importing ? 'Importing…' : `Import ${validRows.length} valid row${validRows.length !== 1 ? 's' : ''}`}
             </button>
           </div>
         </div>
       }
     >
       <div className="space-y-4">
+        {/* Sample template helper */}
+        <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30">
+          <div className="flex items-start gap-2.5">
+            <Download size={16} className="text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">First time? Download the sample template</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                Fill your client data in this exact format (personal, address, holdings, team assignments &amp; family members), then upload it back. The template shows 2 example family members, but you can add more — just copy the "Family 2 …" columns again as "Family 3 …", "Family 4 …" and so on; there's no limit.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            className={btnSecondary + ' text-xs whitespace-nowrap shrink-0'}
+          >
+            <Download size={13} /> Template
+          </button>
+        </div>
+
         {/* Drop zone */}
         <button
           type="button"
@@ -771,7 +1494,7 @@ export function ExcelImportModal({ onClose, onImport }) {
         >
           <FileSpreadsheet size={32} className="text-slate-400 dark:text-slate-600" />
           <span className="font-bold text-sm uppercase tracking-wider">Click to upload spreadsheet</span>
-          <span className="text-xs text-slate-400 dark:text-slate-500 font-sans font-medium">Accepts Name, PAN Card, and Age columns — .xlsx / .xls formats</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500 font-sans font-medium">Imports full client data — Name &amp; PAN required, everything else optional — .xlsx / .xls</span>
         </button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
 
@@ -783,74 +1506,255 @@ export function ExcelImportModal({ onClose, onImport }) {
         )}
 
         {rows && (
-          <div className="overflow-auto max-h-64 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-md">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800 sticky top-0">
-                <tr>
-                  <th className="px-4 py-3 text-left w-12">#</th>
-                  <th className="px-4 py-3 text-left">Name</th>
-                  <th className="px-4 py-3 text-left">PAN</th>
-                  <th className="px-4 py-3 text-left">Age</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {rows.map((r, i) => {
-                  const nameOk = !!r.name;
-                  const panOk = PAN_RE.test(r.pan);
-                  const ok = nameOk && panOk;
-                  return (
-                    <tr key={i} className={`border-t border-slate-100 dark:border-slate-800 ${ok ? 'bg-white dark:bg-slate-900' : 'bg-rose-50/20 dark:bg-rose-950/10'}`}>
-                      <td className="px-4 py-2.5 text-slate-400 dark:text-slate-500">{r.rowNum}</td>
-                      <td className={`px-4 py-2.5 font-bold ${nameOk ? 'text-slate-800 dark:text-slate-200' : 'text-rose-600 dark:text-rose-400'}`}>
-                        {r.name || <em className="font-normal font-sans text-xs opacity-60">empty</em>}
-                      </td>
-                      <td className={`px-4 py-2.5 font-mono tracking-wider text-xs ${panOk ? 'text-slate-800 dark:text-slate-300' : 'text-rose-600 dark:text-rose-400'}`}>
-                        {r.pan || <em className="font-normal font-sans tracking-normal opacity-60">empty</em>}
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-600 dark:text-slate-400 tabular-nums">
-                        {r.age > 0 ? r.age : <em className="font-normal font-sans text-xs opacity-50">—</em>}
-                      </td>
-                      <td className="px-4 py-2.5 font-bold uppercase tracking-wider text-[10px]">
-                        {ok
-                          ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 size={12} /> Valid</span>
-                          : <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><AlertCircle size={12} /> {!nameOk ? 'Missing name' : 'Invalid PAN'}</span>
-                        }
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {rows.length !== validRows.length && (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                Rows highlighted in red have an error — the exact reason is shown under <strong>Status</strong>.
+                Click into a highlighted field to fix it directly (click the <strong>Family</strong> count to expand
+                and fix family-member fields too) — no need to re-upload. You can <strong>import the valid rows now</strong>
+                {' '}and keep fixing the rest; already-imported rows drop off this list.
+              </p>
+            )}
+            <div className="overflow-auto max-h-72 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-md">
+              <table className="w-full text-xs min-w-[1160px]">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-3 text-left w-10">#</th>
+                    <th className="px-3 py-3 text-left">Name</th>
+                    <th className="px-3 py-3 text-left">PAN</th>
+                    <th className="px-3 py-3 text-left">Mobile</th>
+                    <th className="px-3 py-3 text-left">Email</th>
+                    <th className="px-3 py-3 text-left">Address 1</th>
+                    <th className="px-3 py-3 text-left">Address 2</th>
+                    <th className="px-3 py-3 text-left">Address 3</th>
+                    <th className="px-3 py-3 text-left">Pincode</th>
+                    <th className="px-3 py-3 text-left">DOB</th>
+                    <th className="px-3 py-3 text-left">Family</th>
+                    <th className="px-3 py-3 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {rows.map((r, i) => {
+                    const { fields: badFields, msgs, familyFields } = errorsByRow[i];
+                    const ok = msgs.length === 0;
+                    const hasFamily = (r.familyDetails || []).length > 0;
+                    const expanded = expandedRows.has(r.rowNum);
+                    const detailFieldKeys = ['clientType', 'maritalStatus', 'profession', 'state', 'city', 'relationshipManager', 'portfolioManager', 'insuranceManager', 'serviceManager'];
+                    const detailsHaveErrors = detailFieldKeys.some((k) => badFields[k]) || familyFields.some((ff) => Object.keys(ff).length);
+                    const cellCls = (field, extra = '') =>
+                      `w-full bg-transparent border rounded-md px-1.5 py-1 text-xs focus:outline-none focus:ring-2 ${extra} ${
+                        badFields[field]
+                          ? 'border-rose-400 text-rose-700 dark:text-rose-400 focus:ring-rose-500/30'
+                          : 'border-transparent hover:border-slate-300 dark:hover:border-slate-700 focus:ring-blue-500/30 text-slate-800 dark:text-slate-200'
+                      }`;
+                    const detailCellCls = (field, extra = '') =>
+                      `w-full bg-white dark:bg-slate-900 border rounded-md px-1.5 py-1 focus:outline-none focus:ring-2 ${extra} ${
+                        badFields[field]
+                          ? 'border-rose-400 text-rose-700 dark:text-rose-400 focus:ring-rose-500/30'
+                          : 'border-slate-200 dark:border-slate-800 focus:ring-blue-500/30 text-slate-800 dark:text-slate-200'
+                      }`;
+                    return (
+                      <React.Fragment key={r.rowNum}>
+                        <tr className={`border-t border-slate-100 dark:border-slate-800 ${ok ? 'bg-white dark:bg-slate-900' : 'bg-rose-50/20 dark:bg-rose-950/10'}`}>
+                          <td className="px-3 py-1.5 text-slate-400 dark:text-slate-500">{r.rowNum}</td>
+                          <td className="px-1 py-1">
+                            <input value={r.name} onChange={(e) => updateRow(r.rowNum, 'name', e.target.value)} className={cellCls('name', 'font-bold')} placeholder="empty" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input
+                              value={r.pan}
+                              onChange={(e) => updateRow(r.rowNum, 'pan', e.target.value.toUpperCase().slice(0, 10))}
+                              className={cellCls('pan', 'font-mono tracking-wider uppercase')}
+                              placeholder="empty"
+                              maxLength={10}
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input value={r.mobile} onChange={(e) => updateRow(r.rowNum, 'mobile', e.target.value)} className={cellCls('mobile', 'tabular-nums')} placeholder="—" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input value={r.email} onChange={(e) => updateRow(r.rowNum, 'email', e.target.value)} className={cellCls('email', 'lowercase')} placeholder="—" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input value={r.address1} onChange={(e) => updateRow(r.rowNum, 'address1', e.target.value)} className={cellCls('address1')} placeholder="empty" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input value={r.address2} onChange={(e) => updateRow(r.rowNum, 'address2', e.target.value)} className={cellCls('address2')} placeholder="empty" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input value={r.address3} onChange={(e) => updateRow(r.rowNum, 'address3', e.target.value)} className={cellCls('address3')} placeholder="empty" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input value={r.pinCode} onChange={(e) => updateRow(r.rowNum, 'pinCode', e.target.value)} className={cellCls('pinCode', 'tabular-nums')} placeholder="—" maxLength={6} />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input type="date" value={r.dob || ''} onChange={(e) => updateRow(r.rowNum, 'dob', e.target.value)} min={DOB_MIN} max={dobMax()} className={cellCls('dob', 'tabular-nums')} />
+                          </td>
+                          <td className="px-3 py-1.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(r.rowNum)}
+                              title="Client type, profession, location, team assignments & family members"
+                              className={`inline-flex items-center gap-0.5 tabular-nums font-bold cursor-pointer ${
+                                detailsHaveErrors ? 'text-rose-600 dark:text-rose-400' : 'text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              {r.familyDetails?.length || 0} {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            </button>
+                          </td>
+                          <td className="px-3 py-1.5 font-bold uppercase tracking-wider text-[10px] max-w-[200px]">
+                            {ok
+                              ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 size={12} /> Valid</span>
+                              : (
+                                <span className="inline-flex items-start gap-1 text-rose-600 dark:text-rose-400" title={msgs.join('; ')}>
+                                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                                  <span className="normal-case font-semibold leading-snug">{msgs.join(', ')}</span>
+                                </span>
+                              )
+                            }
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr className="bg-slate-50/70 dark:bg-slate-950/40">
+                            <td />
+                            <td colSpan={11} className="px-3 py-2.5 space-y-3">
+                              <div>
+                                <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Client Type / Marital Status / Profession / Location</div>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Client Type</label>
+                                    <select value={r.clientType} onChange={(e) => updateRow(r.rowNum, 'clientType', e.target.value)} className={detailCellCls('clientType')}>
+                                      <option value="">Select…</option>
+                                      {CLIENT_TYPES.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Marital Status</label>
+                                    <select value={r.maritalStatus} onChange={(e) => updateRow(r.rowNum, 'maritalStatus', e.target.value)} className={detailCellCls('maritalStatus')}>
+                                      <option value="">Select…</option>
+                                      {MARITAL_STATUSES.map((m) => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Profession</label>
+                                    <select value={r.profession} onChange={(e) => updateRow(r.rowNum, 'profession', e.target.value)} className={detailCellCls('profession')}>
+                                      <option value="">Select…</option>
+                                      {PROFESSIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-0.5">State</label>
+                                    <input value={r.state} onChange={(e) => updateRow(r.rowNum, 'state', e.target.value)} className={detailCellCls('state')} placeholder="empty" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-0.5">City</label>
+                                    <input value={r.city} onChange={(e) => updateRow(r.rowNum, 'city', e.target.value)} className={detailCellCls('city')} placeholder="empty" />
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Team Assignments</div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                  {Object.entries(MANAGER_LABELS).map(([mf, label]) => (
+                                    <div key={mf}>
+                                      <label className="block text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-0.5">{label}</label>
+                                      <select
+                                        value={resolveManagerId(r.managers?.[mf], team)}
+                                        onChange={(e) => updateRow(r.rowNum, 'managers', { ...r.managers, [mf]: e.target.value })}
+                                        className={detailCellCls(mf)}
+                                      >
+                                        <option value="">Select…</option>
+                                        {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                      </select>
+                                      {badFields[mf] && !resolveManagerId(r.managers?.[mf], team) && r.managers?.[mf] && (
+                                        <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">Sheet had "{r.managers[mf]}" — pick the right person</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              {hasFamily && (
+                              <table className="w-full text-[11px]">
+                                <thead className="text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                  <tr>
+                                    <th className="text-left font-bold py-1 px-1">Name</th>
+                                    <th className="text-left font-bold py-1 px-1">Relation</th>
+                                    <th className="text-left font-bold py-1 px-1">PAN</th>
+                                    <th className="text-left font-bold py-1 px-1">DOB</th>
+                                    <th className="text-left font-bold py-1 px-1">Mobile</th>
+                                    <th className="text-left font-bold py-1 px-1">Email</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {r.familyDetails.map((f, fi) => {
+                                    const ff = familyFields[fi] || {};
+                                    const famCellCls = (field, extra = '') =>
+                                      `w-full bg-white dark:bg-slate-900 border rounded-md px-1.5 py-1 focus:outline-none focus:ring-2 ${extra} ${
+                                        ff[field]
+                                          ? 'border-rose-400 text-rose-700 dark:text-rose-400 focus:ring-rose-500/30'
+                                          : 'border-slate-200 dark:border-slate-800 focus:ring-blue-500/30 text-slate-800 dark:text-slate-200'
+                                      }`;
+                                    return (
+                                      <tr key={fi}>
+                                        <td className="px-1 py-1">
+                                          <input value={f.name} onChange={(e) => updateFamilyField(r.rowNum, fi, 'name', e.target.value)} className={famCellCls('name', 'font-bold')} />
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <select value={f.relation || ''} onChange={(e) => updateFamilyField(r.rowNum, fi, 'relation', e.target.value)} className={famCellCls('relation')}>
+                                            <option value="">Select…</option>
+                                            {RELATIONS.map((rel) => <option key={rel} value={rel}>{rel}</option>)}
+                                          </select>
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <input
+                                            value={f.pan}
+                                            onChange={(e) => updateFamilyField(r.rowNum, fi, 'pan', e.target.value.toUpperCase().slice(0, 10))}
+                                            className={famCellCls('pan', 'font-mono uppercase')}
+                                            placeholder="empty"
+                                            maxLength={10}
+                                          />
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <input type="date" value={f.dob || ''} onChange={(e) => updateFamilyField(r.rowNum, fi, 'dob', e.target.value)} min={DOB_MIN} max={dobMax()} className={famCellCls('dob', 'tabular-nums')} />
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <input value={f.mobile || ''} onChange={(e) => updateFamilyField(r.rowNum, fi, 'mobile', e.target.value)} className={famCellCls('mobile', 'tabular-nums')} placeholder="—" />
+                                        </td>
+                                        <td className="px-1 py-1">
+                                          <input value={f.email || ''} onChange={(e) => updateFamilyField(r.rowNum, fi, 'email', e.target.value)} className={famCellCls('email', 'lowercase')} placeholder="—" />
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </Modal>
   );
 }
 
-// Manager assignment dropdown — picks a member from the shared team roster.
+// Manager assignment dropdown — picks a real account from the team directory
+// and stores its account id.
 function ManagerSelect({ value, onChange }) {
   return (
     <div className="relative">
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={selectCls + ' pr-9'}>
+      <CoolSelect value={value} onChange={(e) => onChange(e.target.value)} className={selectCls + ' pr-9'}>
         <option value="">Unassigned</option>
-        {TEAM_MEMBERS.map(m => <option key={m} value={m}>{m}</option>)}
-      </select>
-      <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none" />
+        {loadTeam().map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </CoolSelect>
     </div>
-  );
-}
-
-// Read-only display of a fixed (non-editable) role holder.
-function FixedRoleField({ label, name }) {
-  return (
-    <Field label={label}>
-      <div className="flex items-center justify-between gap-2 w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-700 dark:text-slate-300 shadow-sm">
-        <span className="font-semibold truncate">{name}</span>
-        <Lock size={13} className="text-slate-400 dark:text-slate-600 shrink-0" />
-      </div>
-    </Field>
   );
 }
 

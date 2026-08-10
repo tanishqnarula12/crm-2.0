@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import SCHEMES from '../utils/schemes.json';
-import { Card, btnPrimary, btnSecondary, btnGhost, inputCls } from './UI';
-import { Plus, Trash2, ArrowLeft, CheckCircle2, ChevronRight, Printer, Lightbulb, Briefcase } from 'lucide-react';
+import { Card, btnPrimary, btnSecondary, btnGhost, inputCls, CoolSelect, selectCls } from './UI';
+import { Plus, Trash2, ArrowLeft, CheckCircle2, ChevronRight, Printer, Lightbulb, Briefcase, Save } from 'lucide-react';
 import { LOGO_DATA_URI } from '../assets/logoBase64';
-import { FIXED_ROLES } from '../utils/team';
 import { addProspects } from '../utils/prospects';
+import { saveGeneratedDocument, wrapStandaloneHtml } from '../utils/documents';
 import { ProspectModal } from './BusinessProspects';
 
 const TYPES = [
   { id: "sip", label: "Fresh SIP" },
+  { id: "specialsip", label: "Special SIP" },
   { id: "sipchanges", label: "Proposed SIP Changes" },
   { id: "sipcancel", label: "SIP Cancellation" },
   { id: "sippause", label: "SIP Pause" },
@@ -21,17 +22,10 @@ const TYPES = [
   { id: "switch", label: "Switch Proposal" }
 ];
 
-const CATEGORIES = [
-  "Small Cap",
-  "Mid Cap",
-  "Large Cap",
-  "Large and Mid Cap",
-  "Flexi Cap",
-  "Multi Cap",
-  "Multi Asset",
-  "Gold",
-  "Debt"
-];
+// Derived from schemes.json's own keys, not a hand-maintained duplicate —
+// see BusinessProspects.jsx's CATEGORIES for why: a separate hardcoded list
+// there had silently drifted to only 9 of these 19 categories.
+const CATEGORIES = Object.keys(SCHEMES);
 
 // Helper to clean commas and parse floats
 const parseNum = (v) => {
@@ -59,7 +53,15 @@ const fmtAmt = (v) => {
   return isNegative ? '-' + formatted : formatted;
 };
 
-export default function InvestmentProposal({ client, isViewer }) {
+export default function InvestmentProposal({ client, isViewer, variant = 'investment' }) {
+  const isOtherCode = variant === 'othercode';
+  const proposalCategory = isOtherCode ? 'othercode' : 'investment';
+  // "Other Code" is a restricted clone of the Investment proposal — only the
+  // SIP Cancellation and Redemption components are offered.
+  const availableTypes = isOtherCode
+    ? TYPES.filter(t => t.id === 'sipcancel' || t.id === 'redemption')
+    : TYPES;
+
   const totalSip = (row) => parseNum(row.currentSip) + parseNum(row.proposedSip);
 
   const getColStyle = (key) => {
@@ -76,7 +78,7 @@ export default function InvestmentProposal({ client, isViewer }) {
   const getSavedVal = (subKey, defaultVal) => {
     try {
       const clientId = client?.id || 'global';
-      const key = `investment_proposal_draft_${clientId}`;
+      const key = `${variant}_proposal_draft_${clientId}`;
       const saved = localStorage.getItem(key);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -89,8 +91,18 @@ export default function InvestmentProposal({ client, isViewer }) {
   };
 
   const [clientName, setClientName] = useState(() => getSavedVal('clientName', client?.name || ''));
-  const [selTypes, setSelTypes] = useState(() => getSavedVal('selTypes', ['sip']));
-  const [activeTab, setActiveTab] = useState(() => getSavedVal('activeTab', 'sip'));
+
+  // Resolve applicant options (Group leader client + family members)
+  const applicantOptions = useMemo(() => {
+    if (!client) return [];
+    const opts = [{ name: client.name, relation: 'Self' }];
+    (client.clientDetails?.familyDetails || []).forEach(f => {
+      if (f.name) opts.push({ name: f.name, relation: f.relation || 'Member' });
+    });
+    return opts;
+  }, [client]);
+  const [selTypes, setSelTypes] = useState(() => getSavedVal('selTypes', isOtherCode ? ['sipcancel'] : ['sip']));
+  const [activeTab, setActiveTab] = useState(() => getSavedVal('activeTab', isOtherCode ? 'sipcancel' : 'sip'));
 
   // Inline preview (rendered on the same page, like the Insurance proposal)
   const [isPreview, setIsPreview] = useState(false);
@@ -105,6 +117,7 @@ export default function InvestmentProposal({ client, isViewer }) {
 
   const [sections, setSections] = useState(() => getSavedVal('sections', {
     sip: [{ category: '', scheme: '', date: '', amount: '' }],
+    specialsip: [{ category: '', scheme: '', date: '', amount: '' }],
     sipchanges: [{ category: '', scheme: '', date: '', currentSip: '', proposedSip: '' }],
     sipcancel: [{ category: '', scheme: '', date: '', amount: '' }],
     sippause: [{ category: '', scheme: '', date: '', amount: '' }],
@@ -118,7 +131,7 @@ export default function InvestmentProposal({ client, isViewer }) {
   }));
 
   const [remarks, setRemarks] = useState(() => getSavedVal('remarks', {
-    sip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: ''
+    sip: '', specialsip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: ''
   }));
 
   // Redemption settings
@@ -141,7 +154,7 @@ export default function InvestmentProposal({ client, isViewer }) {
     const clientId = client?.id || 'global';
     lastLoadedClientId.current = clientId;
     
-    const key = `investment_proposal_draft_${clientId}`;
+    const key = `${variant}_proposal_draft_${clientId}`;
     const saved = localStorage.getItem(key);
     if (saved) {
       try {
@@ -168,7 +181,7 @@ export default function InvestmentProposal({ client, isViewer }) {
         }
         if (parsed.remarks !== undefined) {
           const mergedRemarks = {
-            sip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: '',
+            sip: '', specialsip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: '',
             ...parsed.remarks
           };
           setRemarks(mergedRemarks);
@@ -200,7 +213,7 @@ export default function InvestmentProposal({ client, isViewer }) {
       switch: [{ fromCategory: '', fromScheme: '', toCategory: '', toScheme: '', toAmount: '' }]
     });
     setRemarks({
-      sip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: ''
+      sip: '', specialsip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: ''
     });
     setRedemptionIncludeExemption(true);
     setRedemptionBookedGain('');
@@ -215,7 +228,7 @@ export default function InvestmentProposal({ client, isViewer }) {
     if (clientId !== lastLoadedClientId.current) {
       return;
     }
-    const key = `investment_proposal_draft_${clientId}`;
+    const key = `${variant}_proposal_draft_${clientId}`;
     const draft = {
       clientName,
       selTypes,
@@ -259,6 +272,7 @@ export default function InvestmentProposal({ client, isViewer }) {
   const newRow = (type) => {
     switch (type) {
       case 'sip': return { category: '', scheme: '', date: '', amount: '' };
+      case 'specialsip': return { category: '', scheme: '', date: '', amount: '' };
       case 'sipchanges': return { category: '', scheme: '', date: '', currentSip: '', proposedSip: '' };
       case 'sipcancel': return { category: '', scheme: '', date: '', amount: '' };
       case 'sippause': return { category: '', scheme: '', date: '', amount: '' };
@@ -320,7 +334,7 @@ export default function InvestmentProposal({ client, isViewer }) {
     }
 
     const clientId = client?.id || 'global';
-    const key = `investment_proposal_draft_${clientId}`;
+    const key = `${variant}_proposal_draft_${clientId}`;
     localStorage.removeItem(key);
 
     setClientName(client?.name || '');
@@ -340,7 +354,7 @@ export default function InvestmentProposal({ client, isViewer }) {
       switch: [{ fromCategory: '', fromScheme: '', toCategory: '', toScheme: '', toAmount: '' }]
     });
     setRemarks({
-      sip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: ''
+      sip: '', specialsip: '', sipchanges: '', sipcancel: '', sippause: '', stpcancel: '', swpcancel: '', redemption: '', lumpsum: '', stp: '', swp: '', switch: ''
     });
     setRedemptionIncludeExemption(true);
     setRedemptionBookedGain('');
@@ -625,6 +639,16 @@ export default function InvestmentProposal({ client, isViewer }) {
 
   // Build one prospect draft per selected proposal type, then open the confirm modal
   const openCreateProspect = () => {
+    // Block empty proposals up front — a prospect can't be created from a
+    // proposal with no amount entered (SIP Cancellation/Registration are
+    // exempt here since their amount is typed fresh in the confirm modal,
+    // which enforces it there instead).
+    const zeroAmountType = selTypes.find((type) => type !== 'sipchanges' && !(Number(amountForType(type)) > 0));
+    if (zeroAmountType) {
+      const label = TYPES.find((p) => p.id === zeroAmountType)?.label || zeroAmountType;
+      alert(`Please enter an amount for "${label}" before creating a prospect.`);
+      return;
+    }
     const drafts = [];
     selTypes.forEach((type) => {
       const label = TYPES.find((p) => p.id === type)?.label || '';
@@ -646,7 +670,7 @@ export default function InvestmentProposal({ client, isViewer }) {
 
         drafts.push({
           proposalType: 'SIP Cancellation',
-          proposalCategory: 'investment',
+          proposalCategory,
           amount: '',
           table: {
             cols: ["Category", "Scheme Name", "Date of SIP", "Amount (Rs)"],
@@ -656,7 +680,7 @@ export default function InvestmentProposal({ client, isViewer }) {
         });
         drafts.push({
           proposalType: 'SIP Registration',
-          proposalCategory: 'investment',
+          proposalCategory,
           amount: '',
           table: {
             cols: ["Category", "Scheme Name", "Date of SIP", "Amount (Rs)"],
@@ -667,7 +691,7 @@ export default function InvestmentProposal({ client, isViewer }) {
       } else {
         drafts.push({
           proposalType: label,
-          proposalCategory: 'investment',
+          proposalCategory,
           amount: amountForType(type),
           table: sec ? { cols: sec.cols, rows: sec.rows, totalRow: sec.totalRow } : { cols: [], rows: [] },
         });
@@ -683,8 +707,8 @@ export default function InvestmentProposal({ client, isViewer }) {
       relationshipManager: d.relationshipManager || '',
       portfolioManager: d.portfolioManager || '',
       insuranceManager: d.insuranceManager || '',
-      owner: FIXED_ROLES.owner,
-      internalManager: FIXED_ROLES.internalManager,
+      owner: d.owner || '',
+      internalManager: d.internalManager || '',
     });
     setProspectDrafts(drafts);
     setShowProspectModal(true);
@@ -698,9 +722,38 @@ export default function InvestmentProposal({ client, isViewer }) {
     setTimeout(() => setProspectToast(''), 4000);
   };
 
+  const [savingDoc, setSavingDoc] = useState(false);
+  const handleSaveDocument = async () => {
+    if (!client?.id) {
+      setProspectToast('⚠️ This proposal is not linked to a saved client, so it cannot be saved.');
+      setTimeout(() => setProspectToast(''), 4000);
+      return;
+    }
+    setSavingDoc(true);
+    try {
+      const docLabel = isOtherCode ? 'Other Code Proposal' : 'Investment Proposal';
+      const html = wrapStandaloneHtml(
+        `<div class="inv-proposal-doc">${previewHtml}</div>`,
+        `${docLabel} — ${client.name}`
+      );
+      const name = await saveGeneratedDocument(client, {
+        kind: isOtherCode ? 'othercode' : 'investment',
+        label: docLabel,
+        html,
+      });
+      setProspectToast(`✅ Saved to Documents as ${name}`);
+    } catch (err) {
+      setProspectToast(`⚠️ ${err.message || 'Could not save document.'}`);
+    } finally {
+      setSavingDoc(false);
+      setTimeout(() => setProspectToast(''), 4000);
+    }
+  };
+
   const getIntroText = (type) => {
     switch (type) {
       case 'sip': return "We recommend starting fresh Systematic Investment Plans (SIP) in the following mutual fund schemes to align with your long-term wealth accumulation objectives.";
+      case 'specialsip': return "We recommend initiating Special Systematic Investment Plans (Special SIP) in the following mutual fund schemes as a targeted strategy to address specific financial goals or market opportunities.";
       case 'sipchanges': return "Based on our review, we propose the following changes to your existing Systematic Investment Plans (SIP) to optimize asset allocation and portfolio performance.";
       case 'sipcancel': return "This is in reference to our discussion regarding your ongoing SIP investments. Following a review of your portfolio and financial objectives, we recommend discontinuing the following SIPs. The proposed change is designed to better align your investments with your current requirements and overall financial plan.";
       case 'sippause': return "This is in reference to our discussion regarding your SIP investments. Considering your current financial situation and cash flow requirements, we recommend a temporary pause of the following SIPs for 2 months. The objective is to provide short-term flexibility while preserving your overall investment strategy.";
@@ -873,11 +926,11 @@ export default function InvestmentProposal({ client, isViewer }) {
 
     // Informational note on applicable capital-gains tax rates
     const noteHTML = `
-      <div style='margin-top:16px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-left:4px solid #f59e0b;border-radius:4px;font-size:12px;color:#334155;line-height:1.5;display:flex;align-items:center;flex-wrap:wrap;gap:8px;'>
+      <div style='margin-top:16px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-left:4px solid #f59e0b;border-radius:4px;font-size:12px;color:#334155;line-height:1.5;display:flex;align-items:center;flex-wrap:wrap;gap:8px;break-inside:avoid;page-break-inside:avoid;'>
         <strong style='color:#92400e;text-transform:uppercase;font-size:11px;letter-spacing:1px;display:flex;align-items:center;gap:4px;margin-right:4px;'>
           <span style='font-size:14px;'>💡</span> Applicable Tax Rates:
         </strong>
-        <span style='font-weight:700;color:#0d2b5e;'>Equity:</span> Short Term <strong>20%</strong>, Long Term <strong>12%</strong>
+        <span style='font-weight:700;color:#0d2b5e;'>Equity:</span> Short Term <strong>20%</strong>, Long Term <strong>12.5%</strong>
         <span style='color:#f59e0b;margin:0 6px;'>|</span>
         <span style='font-weight:700;color:#0d2b5e;'>Debt:</span> Short Term <strong>As Per Tax Slab</strong>, Long Term <strong>12.5%</strong>
       </div>`;
@@ -913,7 +966,7 @@ export default function InvestmentProposal({ client, isViewer }) {
           ${rs.includeExemption ? '✓ ₹1.25 Lakh Exemption Included' : '✗ ₹1.25 Lakh Exemption Excluded'}${rs.booked > 0 ? ` &nbsp;|&nbsp; Booked Gain: ₹ ${rs.booked.toLocaleString('en-IN')}` : ''}
         </div>
 
-        <div style='margin-top:14px;display:flex;gap:14px;'>
+        <div style='margin-top:14px;display:flex;gap:14px;break-inside:avoid;page-break-inside:avoid;'>
           <div style='flex:1;padding:14px 20px;background:#0d2b5e;border-radius:8px;color:#fff;'>
             <div style='font-size:10px;letter-spacing:1.5px;text-transform:uppercase;opacity:0.8;margin-bottom:8px;font-weight:700;'>Equity Tax Liability</div>
             <div style='font-size:20px;font-weight:800;margin-bottom:8px;'>₹ ${Math.round(calc.equityTax).toLocaleString('en-IN')}</div>
@@ -924,6 +977,7 @@ export default function InvestmentProposal({ client, isViewer }) {
           </div>
           <div style='flex:1;padding:14px 20px;background:#1a4a9c;border-radius:8px;color:#fff;'>
             <div style='font-size:10px;letter-spacing:1.5px;text-transform:uppercase;opacity:0.8;margin-bottom:8px;font-weight:700;'>Debt Tax Liability</div>
+            ${calc.hasDebtST ? `<span style='display:inline-block;margin-bottom:8px;padding:3px 10px;background:rgba(255,255,255,0.92);color:#1a4a9c;font-size:10px;font-weight:700;border-radius:999px;letter-spacing:0.3px;'>As Per Tax Slab</span>` : ''}
             <div style='font-size:20px;font-weight:800;margin-bottom:8px;'>${debtDisp}</div>
             <div style='font-size:12px;opacity:0.9;line-height:1.6;'>
               Short Term: ${calc.hasDebtST ? 'As Per Tax Slab, will be added to your income' : '₹ 0'}<br>
@@ -958,7 +1012,7 @@ export default function InvestmentProposal({ client, isViewer }) {
     });
 
     return `
-      <div style='margin-top:20px;'>
+      <div style='margin-top:20px;break-inside:avoid;page-break-inside:avoid;'>
         <div style='font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#0d2b5e;margin-bottom:8px;'>Accompanying Bank Details</div>
         <table style='width:100%;border-collapse:collapse;'>
           <thead>
@@ -1024,6 +1078,7 @@ export default function InvestmentProposal({ client, isViewer }) {
   // Scheme columns meta mapping
   const COLS = {
     sip: ["Category", "Scheme Name", "Date of SIP", "Amount (Rs)"],
+    specialsip: ["Category", "Scheme Name", "Date of SIP", "Amount (Rs)"],
     sipchanges: ["Category", "Scheme Name", "Date of SIP", "Current SIP (Rs)", "Proposed SIP (Rs)", "Total SIP (Rs)"],
     sipcancel: ["Category", "Scheme Name", "Date of SIP", "SIP Amount (Rs)"],
     sippause: ["Category", "Scheme Name", "Date of SIP", "SIP Amount (Rs)"],
@@ -1038,6 +1093,7 @@ export default function InvestmentProposal({ client, isViewer }) {
 
   const KEYS = {
     sip: ["category", "scheme", "date", "amount"],
+    specialsip: ["category", "scheme", "date", "amount"],
     sipchanges: ["category", "scheme", "date", "currentSip", "proposedSip", "totalSip"],
     sipcancel: ["category", "scheme", "date", "amount"],
     sippause: ["category", "scheme", "date", "amount"],
@@ -1052,6 +1108,7 @@ export default function InvestmentProposal({ client, isViewer }) {
 
   const CURR = {
     sip: ["amount"],
+    specialsip: ["amount"],
     sipchanges: ["currentSip", "proposedSip", "totalSip"],
     sipcancel: ["amount"],
     sippause: ["amount"],
@@ -1064,7 +1121,7 @@ export default function InvestmentProposal({ client, isViewer }) {
     switch: ["toAmount"]
   };
 
-  const HAS_TOTAL = ["sip", "sipchanges", "sipcancel", "sippause", "stpcancel", "swpcancel", "redemption", "lumpsum", "stp", "swp", "switch"];
+  const HAS_TOTAL = ["sip", "specialsip", "sipchanges", "sipcancel", "sippause", "stpcancel", "swpcancel", "redemption", "lumpsum", "stp", "swp", "switch"];
 
   const SPLIT_TOTAL = {
     // labelCols + cols.length must equal the total column count (incl. S.No)
@@ -1100,6 +1157,20 @@ export default function InvestmentProposal({ client, isViewer }) {
     });
   })();
 
+  // Browser "Print / Save PDF" defaults its filename to document.title — set
+  // it to "<Proposal Type(s)> of <Client>" right before printing (comma-
+  // joined when multiple types are selected), then restore the app's normal
+  // title once the print dialog closes, so this never leaks into the tab
+  // title elsewhere in the app.
+  const handlePrint = () => {
+    const typeLabels = selTypes.map((tId) => TYPES.find((t) => t.id === tId)?.label).filter(Boolean);
+    const who = clientName || client?.name || 'Client';
+    const prevTitle = document.title;
+    document.title = `${typeLabels.join(', ') || 'Investment Proposal'} of ${who}`;
+    window.print();
+    document.title = prevTitle;
+  };
+
   if (isPreview) {
     return (
       <div className="space-y-6 animate-scale-up">
@@ -1110,10 +1181,13 @@ export default function InvestmentProposal({ client, isViewer }) {
             <ArrowLeft size={16} /> Edit Form
           </button>
           <div className="flex items-center gap-3">
+            <button onClick={handleSaveDocument} disabled={savingDoc} className={btnSecondary + ' py-2 px-4 !text-emerald-700 dark:!text-emerald-400 !border-emerald-200 dark:!border-emerald-900/50 disabled:opacity-60'}>
+              <Save size={15} /> {savingDoc ? 'Saving…' : 'Save Document'}
+            </button>
             <button onClick={openCreateProspect} className={btnSecondary + ' py-2 px-4'}>
               <Briefcase size={15} /> Create Prospect
             </button>
-            <button onClick={() => window.print()} className={btnPrimary + ' py-2 px-5'}>
+            <button onClick={handlePrint} className={btnPrimary + ' py-2 px-5'}>
               <Printer size={15} /> Print / Save PDF
             </button>
           </div>
@@ -1132,6 +1206,7 @@ export default function InvestmentProposal({ client, isViewer }) {
             mode="create"
             drafts={prospectDrafts}
             base={prospectBase}
+            clients={client ? [client] : []}
             onClose={() => setShowProspectModal(false)}
             onConfirm={handleProspectConfirm}
           />
@@ -1150,7 +1225,7 @@ export default function InvestmentProposal({ client, isViewer }) {
               <Plus size={18} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Investment Proposal Setup</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">{isOtherCode ? 'Other Code Setup' : 'Investment Proposal Setup'}</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium font-sans">Set client name and select proposal category components</p>
             </div>
           </div>
@@ -1165,19 +1240,33 @@ export default function InvestmentProposal({ client, isViewer }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Client Name</label>
-            <input
-              type="text"
-              value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-              placeholder="e.g. Mehul Khandelwal"
-              className={inputCls}
-            />
+            {applicantOptions.length > 0 ? (
+              <CoolSelect
+                showValueOnSelect={true}
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                className={selectCls}
+              >
+                <option value="">Select client…</option>
+                {applicantOptions.map(o => (
+                  <option key={o.name} value={o.name}>{o.name} ({o.relation})</option>
+                ))}
+              </CoolSelect>
+            ) : (
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="e.g. full name"
+                className={inputCls}
+              />
+            )}
           </div>
 
           <div>
             <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Proposal Components</label>
             <div className="flex flex-wrap gap-2 mt-1">
-              {TYPES.map(t => (
+              {availableTypes.map(t => (
                 <button
                   key={t.id}
                   type="button"
